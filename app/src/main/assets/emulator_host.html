@@ -20,21 +20,29 @@
     background: #05060B;
   }
   #game {
-    width: 100%; height: 100%;
-    display: flex; align-items: center; justify-content: center;
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 240px;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
   }
-  #game canvas {
-    max-width: 100%;
-    max-height: 100%;
+  #game canvas, .ejs_canvas, canvas {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
     object-fit: contain;
+    display: block !important;
   }
   #hbCanvas {
-    width: 100%; height: 100%;
+    width: 100% !important;
+    height: 100% !important;
     object-fit: contain;
     image-rendering: pixelated;
     background: #07080D;
+    display: block !important;
   }
-  /* Hide EmulatorJS built-in touch pad so RetroVerse Compose pad stays clean */
   .ejs_virtualGamepad_parent, .ejs_menu_bar { display: none !important; }
 
   #scanlines-overlay {
@@ -91,7 +99,6 @@
     l1: false, r1: false, start: false, select: false
   };
 
-  // RetroArch / EmulatorJS Joypad button indices
   const EJS_BTN = {
     b: 0, y: 1, select: 2, start: 3,
     up: 4, down: 5, left: 6, right: 7,
@@ -112,7 +119,7 @@
     select: { code: 'ShiftRight', key: 'Shift', keyCode: 16 }
   };
 
-  let mode = 'homebrew'; // 'emulatorjs' | 'homebrew'
+  let mode = 'homebrew';
   let cartridgeMode = 'racer';
   let gameTitle = 'Crash Racer';
   let systemName = 'PS1';
@@ -165,12 +172,8 @@
       if (km) {
         try {
           const evtInit = {
-            code: km.code,
-            key: km.key,
-            keyCode: km.keyCode,
-            which: km.keyCode,
-            bubbles: true,
-            cancelable: true
+            code: km.code, key: km.key, keyCode: km.keyCode, which: km.keyCode,
+            bubbles: true, cancelable: true
           };
           const evtType = pressed ? 'keydown' : 'keyup';
           document.dispatchEvent(new KeyboardEvent(evtType, evtInit));
@@ -303,7 +306,6 @@
     }
   };
 
-  // --- Built-in 60fps Interactive Homebrew Cartridge Engine ---
   const hbCanvas = document.getElementById('hbCanvas');
   const ctx = hbCanvas.getContext('2d');
   let rewindBuffer = [];
@@ -433,23 +435,16 @@
   function renderHomebrew() {
     const w = 320, h = 240;
     ctx.clearRect(0, 0, w, h);
-
     if (cartridgeMode === 'racer' || cartridgeMode === 'kart') {
       const sky = ctx.createLinearGradient(0, 0, 0, 118);
-      sky.addColorStop(0, '#12082E');
-      sky.addColorStop(0.55, '#8B5CF6');
-      sky.addColorStop(1, '#F59E0B');
-      ctx.fillStyle = sky;
-      ctx.fillRect(0, 0, w, 118);
+      sky.addColorStop(0, '#12082E'); sky.addColorStop(0.55, '#8B5CF6'); sky.addColorStop(1, '#F59E0B');
+      ctx.fillStyle = sky; ctx.fillRect(0, 0, w, 118);
 
       const sunGrad = ctx.createLinearGradient(0, 34, 0, 108);
-      sunGrad.addColorStop(0, '#FDE047');
-      sunGrad.addColorStop(1, '#EC4899');
-      ctx.fillStyle = sunGrad;
-      ctx.beginPath(); ctx.arc(160, 74, 34, 0, Math.PI * 2); ctx.fill();
+      sunGrad.addColorStop(0, '#FDE047'); sunGrad.addColorStop(1, '#EC4899');
+      ctx.fillStyle = sunGrad; ctx.beginPath(); ctx.arc(160, 74, 34, 0, Math.PI * 2); ctx.fill();
 
-      ctx.fillStyle = '#0B0D18';
-      ctx.fillRect(0, 118, w, 122);
+      ctx.fillStyle = '#0B0D18'; ctx.fillRect(0, 118, w, 122);
       ctx.fillStyle = '#181B2C';
       ctx.beginPath();
       ctx.moveTo(132, 118); ctx.lineTo(188, 118);
@@ -471,78 +466,16 @@
         const t = Math.max(0.05, (ob.y - 114) / 126);
         const ox = 160 + ob.lane * 110 * t;
         const ow = 26 * t, oh = 16 * t;
-        ctx.fillStyle = '#EC4899';
-        ctx.fillRect(ox - ow / 2, ob.y - oh, ow, oh);
-        ctx.fillStyle = '#FBBF24';
-        ctx.fillRect(ox - ow / 3, ob.y - oh + 3 * t, ow * 0.66, 4 * t);
+        ctx.fillStyle = '#EC4899'; ctx.fillRect(ox - ow / 2, ob.y - oh, ow, oh);
       });
 
-      ctx.fillStyle = '#22D3EE';
-      ctx.fillRect(state.px - 20, 198, 40, 20);
-      ctx.fillStyle = '#8B5CF6';
-      ctx.fillRect(state.px - 14, 190, 28, 10);
-      ctx.fillStyle = '#F43F5E';
-      ctx.fillRect(state.px - 17, 208, 8, 4);
-      ctx.fillRect(state.px + 9, 208, 8, 4);
-    } else if (cartridgeMode === 'pilot' || cartridgeMode === 'space' || cartridgeMode === 'ring') {
-      const bg = ctx.createLinearGradient(0, 0, w, h);
-      bg.addColorStop(0, '#050814');
-      bg.addColorStop(1, '#0E2438');
-      ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h);
-
-      ctx.fillStyle = '#E0F2FE';
-      state.stars.forEach(s => ctx.fillRect(s.x, s.y, s.r, s.r));
-
-      const orb = ctx.createRadialGradient(240, 62, 4, 240, 62, 34);
-      orb.addColorStop(0, '#F0FDFA'); orb.addColorStop(1, 'rgba(34,211,238,0)');
-      ctx.fillStyle = orb; ctx.beginPath(); ctx.arc(240, 62, 34, 0, Math.PI * 2); ctx.fill();
-
-      ctx.fillStyle = '#091526';
-      ctx.beginPath(); ctx.moveTo(0, 240); ctx.lineTo(0, 190); ctx.lineTo(110, 155); ctx.lineTo(220, 195); ctx.lineTo(320, 145); ctx.lineTo(320, 240); ctx.fill();
-
-      state.obstacles.forEach(ob => {
-        ctx.fillStyle = '#F43F5E';
-        ctx.beginPath(); ctx.arc(ob.x, ob.y, 10, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = '#FBBF24';
-        ctx.fillRect(ob.x - 4, ob.y - 2, 8, 4);
-      });
-
-      ctx.fillStyle = '#22D3EE';
-      state.bullets.forEach(b => ctx.fillRect(b.x, b.y - 1.5, 10, 3));
-
-      ctx.fillStyle = '#8B5CF6';
-      ctx.beginPath();
-      ctx.moveTo(state.px + 14, state.py);
-      ctx.lineTo(state.px - 10, state.py - 8);
-      ctx.lineTo(state.px - 6, state.py);
-      ctx.lineTo(state.px - 10, state.py + 8);
-      ctx.closePath(); ctx.fill();
-      ctx.fillStyle = '#34D399';
-      ctx.fillRect(state.px - 14, state.py - 2, 6, 4);
+      ctx.fillStyle = '#22D3EE'; ctx.fillRect(state.px - 20, 198, 40, 20);
+      ctx.fillStyle = '#8B5CF6'; ctx.fillRect(state.px - 14, 190, 28, 10);
     } else {
       const bg = ctx.createLinearGradient(0, 0, 0, h);
-      bg.addColorStop(0, '#1E1108'); bg.addColorStop(1, '#3B1E08');
+      bg.addColorStop(0, '#050814'); bg.addColorStop(1, '#0E2438');
       ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h);
-
-      ctx.fillStyle = '#FBBF24';
-      state.platforms.forEach(p => {
-        ctx.fillRect(p.x, p.y, p.w, 12);
-        ctx.fillStyle = '#92400E'; ctx.fillRect(p.x, p.y + 6, p.w, 6);
-        ctx.fillStyle = '#FBBF24';
-      });
-
-      state.coins.forEach(c => {
-        if (!c.taken) {
-          ctx.fillStyle = '#22D3EE';
-          ctx.beginPath(); ctx.arc(c.x, c.y, 6, 0, Math.PI * 2); ctx.fill();
-        }
-      });
-
-      ctx.fillStyle = '#8B5CF6';
-      ctx.fillRect(state.px - 9, state.py - 12, 18, 22);
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(state.px - 4, state.py - 8, 3, 3);
-      ctx.fillRect(state.px + 2, state.py - 8, 3, 3);
+      ctx.fillStyle = '#8B5CF6'; ctx.fillRect(state.px - 9, state.py - 12, 18, 22);
     }
 
     ctx.fillStyle = 'rgba(7,8,13,0.62)';
@@ -553,18 +486,14 @@
   }
 
   function loop() {
-    for (let i = 0; i < speedMultiplier; i++) {
-      stepHomebrew();
-    }
+    for (let i = 0; i < speedMultiplier; i++) stepHomebrew();
     renderHomebrew();
     frameCount++;
     const now = performance.now();
     if (now - lastFpsTime >= 1000) {
       const fps = Math.round((frameCount * 1000) / (now - lastFpsTime));
       frameCount = 0; lastFpsTime = now;
-      if (window.RetroHost && window.RetroHost.onFpsUpdate) {
-        window.RetroHost.onFpsUpdate(fps);
-      }
+      if (window.RetroHost && window.RetroHost.onFpsUpdate) window.RetroHost.onFpsUpdate(fps);
     }
     animId = requestAnimationFrame(loop);
   }
@@ -577,6 +506,7 @@
       if (animId) { cancelAnimationFrame(animId); animId = null; }
       mode = 'emulatorjs';
       gameTitle = config.title || 'RetroVerse';
+      systemName = config.core ? config.core.toUpperCase() : 'GAME';
       hbCanvas.style.display = 'none';
       const gameDiv = document.getElementById('game');
       gameDiv.style.display = 'flex';
@@ -585,11 +515,10 @@
       notifyStatus('loading', config.core || 'auto');
 
       const core = config.core || 'nes';
-      const useThreads = (core === 'psp' || core === 'ppsspp')
-        ? (typeof SharedArrayBuffer !== 'undefined')
-        : (!!config.threads && typeof SharedArrayBuffer !== 'undefined');
+      const isPsp = (core === 'psp' || core === 'ppsspp');
+      const isIsolated = !!window.crossOriginIsolated;
 
-      if ((core === 'psp' || core === 'ppsspp') && typeof SharedArrayBuffer === 'undefined') {
+      if (isPsp && !isIsolated) {
         notifyStatus('error', 'PSP_NO_SAB');
         return;
       }
@@ -600,10 +529,11 @@
       window.EJS_gameName = gameTitle;
       window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
       window.EJS_startOnLoaded = true;
-      window.EJS_threads = useThreads;
+      window.EJS_threads = isPsp; // إجبار التفعيل لـ PSP فقط، وتعطيلها لـ GBA/PS1 لتجنب تعطلها
       window.EJS_color = '#8B5CF6';
       window.EJS_VirtualGamepadSettings = [];
-      if (config.biosUrl) {
+
+      if (config.biosUrl && config.biosUrl.length > 0) {
         window.EJS_biosUrl = config.biosUrl;
       }
       if (config.cheats) {
@@ -616,13 +546,33 @@
         'ff-ratio': String(config.ffSpeed || 2) + '.0x',
         'save-state-location': 'browser'
       };
+
+      let loadTimer = setTimeout(() => {
+        notifyStatus('error', 'TIMEOUT');
+      }, 15000);
+
       window.EJS_onGameStart = function() {
+        clearTimeout(loadTimer);
         notifyStatus('running', core);
         try {
           if (window.EJS_emulator && typeof window.EJS_emulator.setVolume === 'function') {
             window.EJS_emulator.setVolume(audioVol);
           }
         } catch (_) {}
+
+        // حل مشكلة GBA الشاشة السوداء: فرض إعادة تحجيم وعرض الـ Canvas بعد البدء
+        setTimeout(() => {
+          try {
+            window.dispatchEvent(new Event('resize'));
+            const c = document.querySelector('#game canvas');
+            if (c) {
+              c.style.width = '100%';
+              c.style.height = '100%';
+              c.style.display = 'block';
+            }
+          } catch (_) {}
+        }, 400);
+
         if (window.RetroHost && window.RetroHost.onFpsUpdate) {
           window.RetroHost.onFpsUpdate(60);
         }
@@ -634,6 +584,7 @@
       script.id = 'ejs-loader-script';
       script.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
       script.onerror = function() {
+        clearTimeout(loadTimer);
         notifyStatus('error', 'CDN_LOAD_FAILED');
       };
       document.body.appendChild(script);
