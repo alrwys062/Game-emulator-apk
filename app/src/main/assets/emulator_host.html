@@ -8,20 +8,25 @@
   * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
   html, body {
     width: 100%; height: 100%;
-    background: #07080D;
+    background: #05060B;
     overflow: hidden;
     display: flex; align-items: center; justify-content: center;
-    font-family: sans-serif;
+    font-family: system-ui, -apple-system, sans-serif;
   }
   #stage {
     position: relative;
     width: 100%; height: 100%;
     display: flex; align-items: center; justify-content: center;
-    background: #05060A;
+    background: #05060B;
   }
   #game {
     width: 100%; height: 100%;
     display: flex; align-items: center; justify-content: center;
+  }
+  #game canvas {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
   }
   #hbCanvas {
     width: 100%; height: 100%;
@@ -29,10 +34,9 @@
     image-rendering: pixelated;
     background: #07080D;
   }
-  /* Hide EmulatorJS default virtual gamepad since RetroVerse provides native Compose controls */
+  /* Hide EmulatorJS built-in touch pad so RetroVerse Compose pad stays clean */
   .ejs_virtualGamepad_parent, .ejs_menu_bar { display: none !important; }
 
-  /* Graphics filter overlays */
   #scanlines-overlay {
     pointer-events: none;
     position: absolute; inset: 0;
@@ -40,8 +44,8 @@
       to bottom,
       rgba(0,0,0,0) 0px,
       rgba(0,0,0,0) 2px,
-      rgba(0,0,0,0.32) 3px,
-      rgba(0,0,0,0.32) 4px
+      rgba(0,0,0,0.34) 3px,
+      rgba(0,0,0,0.34) 4px
     );
     opacity: 0;
     z-index: 20;
@@ -56,12 +60,19 @@
     z-index: 21;
     transition: opacity 0.2s ease;
   }
-  .filter-crt #scanlines-overlay { opacity: 0.75; }
+  .filter-crt #scanlines-overlay { opacity: 0.72; }
   .filter-crt #crt-overlay { opacity: 1; }
-  .filter-scanlines #scanlines-overlay { opacity: 0.9; }
+  .filter-scanlines #scanlines-overlay { opacity: 0.90; }
+  .filter-lcd #scanlines-overlay {
+    opacity: 0.42;
+    background: repeating-linear-gradient(90deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 3px),
+                repeating-linear-gradient(0deg, rgba(0,0,0,0.22) 0 1px, transparent 1px 3px);
+  }
   .scanlines-on #scanlines-overlay { opacity: 0.85; }
   .aspect-43 #hbCanvas, .aspect-43 #game { max-width: calc(100vh * 4 / 3); aspect-ratio: 4 / 3; }
-  .aspect-169 #hbCanvas, .aspect-169 #game { width: 100%; height: 100%; }
+  .aspect-169 #hbCanvas, .aspect-169 #game { width: 100%; height: 100%; max-width: 100%; }
+  .aspect-full #hbCanvas, .aspect-full #game { width: 100%; height: 100%; max-width: 100%; }
+  .aspect-full #hbCanvas, .aspect-full #game canvas { object-fit: fill !important; }
 </style>
 </head>
 <body class="filter-crt aspect-43">
@@ -80,16 +91,25 @@
     l1: false, r1: false, start: false, select: false
   };
 
-  // EmulatorJS button index map (RetroArch Joypad)
+  // RetroArch / EmulatorJS Joypad button indices
   const EJS_BTN = {
     b: 0, y: 1, select: 2, start: 3,
     up: 4, down: 5, left: 6, right: 7,
     a: 8, x: 9, l1: 10, r1: 11
   };
   const KEY_MAP = {
-    up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight',
-    a: 'KeyZ', b: 'KeyX', x: 'KeyA', y: 'KeyS',
-    l1: 'KeyQ', r1: 'KeyW', start: 'Enter', select: 'ShiftRight'
+    up: { code: 'ArrowUp', key: 'ArrowUp', keyCode: 38 },
+    down: { code: 'ArrowDown', key: 'ArrowDown', keyCode: 40 },
+    left: { code: 'ArrowLeft', key: 'ArrowLeft', keyCode: 37 },
+    right: { code: 'ArrowRight', key: 'ArrowRight', keyCode: 39 },
+    a: { code: 'KeyZ', key: 'z', keyCode: 90 },
+    b: { code: 'KeyX', key: 'x', keyCode: 88 },
+    x: { code: 'KeyA', key: 'a', keyCode: 65 },
+    y: { code: 'KeyS', key: 's', keyCode: 83 },
+    l1: { code: 'KeyQ', key: 'q', keyCode: 81 },
+    r1: { code: 'KeyW', key: 'w', keyCode: 87 },
+    start: { code: 'Enter', key: 'Enter', keyCode: 13 },
+    select: { code: 'ShiftRight', key: 'Shift', keyCode: 16 }
   };
 
   let mode = 'homebrew'; // 'emulatorjs' | 'homebrew'
@@ -98,7 +118,16 @@
   let systemName = 'PS1';
   let speedMultiplier = 1;
   let audioVol = 0.75;
+  let paused = false;
   let audioCtx = null;
+
+  function notifyStatus(status, detail) {
+    try {
+      if (window.RetroHost && window.RetroHost.onEngineStatus) {
+        window.RetroHost.onEngineStatus(status, detail || '');
+      }
+    } catch (_) {}
+  }
 
   function beep(freq, dur, type) {
     if (audioVol <= 0.02) return;
@@ -120,7 +149,7 @@
     setKey: function(name, pressed) {
       const prev = keys[name];
       keys[name] = !!pressed;
-      if (pressed && !prev) {
+      if (pressed && !prev && mode === 'homebrew') {
         if (name === 'a' || name === 'b') beep(520, 0.07, 'square');
         else if (name === 'x' || name === 'y') beep(680, 0.06, 'triangle');
       }
@@ -132,10 +161,22 @@
           }
         } catch (_) {}
       }
-      const code = KEY_MAP[name];
-      if (code) {
+      const km = KEY_MAP[name];
+      if (km) {
         try {
-          window.dispatchEvent(new KeyboardEvent(pressed ? 'keydown' : 'keyup', { code: code, key: code, bubbles: true }));
+          const evtInit = {
+            code: km.code,
+            key: km.key,
+            keyCode: km.keyCode,
+            which: km.keyCode,
+            bubbles: true,
+            cancelable: true
+          };
+          const evtType = pressed ? 'keydown' : 'keyup';
+          document.dispatchEvent(new KeyboardEvent(evtType, evtInit));
+          window.dispatchEvent(new KeyboardEvent(evtType, evtInit));
+          const canvas = document.querySelector('#game canvas');
+          if (canvas) canvas.dispatchEvent(new KeyboardEvent(evtType, evtInit));
         } catch (_) {}
       }
     }
@@ -145,14 +186,27 @@
     applySettings: function(filter, scanlines, aspect, volume) {
       audioVol = Math.max(0, Math.min(1, volume));
       const b = document.body;
-      b.classList.remove('filter-crt', 'filter-scanlines', 'filter-sharp', 'scanlines-on', 'aspect-43', 'aspect-169', 'aspect-orig');
+      b.classList.remove(
+        'filter-crt', 'filter-scanlines', 'filter-sharp', 'filter-lcd',
+        'scanlines-on', 'aspect-43', 'aspect-169', 'aspect-orig', 'aspect-full'
+      );
       if (filter === 'CRT') b.classList.add('filter-crt');
       else if (filter === 'Scanlines') b.classList.add('filter-scanlines');
+      else if (filter === 'LCD') b.classList.add('filter-lcd');
       else b.classList.add('filter-sharp');
       if (scanlines) b.classList.add('scanlines-on');
       if (aspect === '16:9') b.classList.add('aspect-169');
+      else if (aspect === 'Full') b.classList.add('aspect-full');
       else if (aspect === 'Original') b.classList.add('aspect-orig');
       else b.classList.add('aspect-43');
+
+      if (mode === 'emulatorjs' && window.EJS_emulator) {
+        try {
+          if (typeof window.EJS_emulator.setVolume === 'function') {
+            window.EJS_emulator.setVolume(audioVol);
+          }
+        } catch (_) {}
+      }
     },
     setSpeed: function(mult) {
       speedMultiplier = mult || 1;
@@ -162,7 +216,34 @@
         } catch (_) {}
       }
     },
+    togglePause: function() {
+      paused = !paused;
+      if (mode === 'emulatorjs' && window.EJS_emulator) {
+        try {
+          if (paused && window.EJS_emulator.pause) window.EJS_emulator.pause(true);
+          else if (!paused && window.EJS_emulator.play) window.EJS_emulator.play();
+        } catch (_) {}
+      }
+      return paused;
+    },
+    resetGame: function() {
+      if (mode === 'emulatorjs' && window.EJS_emulator && window.EJS_emulator.gameManager) {
+        try { window.EJS_emulator.gameManager.restart(); return true; } catch (_) {}
+      } else {
+        initHomebrew(gameTitle, systemName, cartridgeMode);
+        return true;
+      }
+      return false;
+    },
     rewindStep: function() {
+      if (mode === 'emulatorjs' && window.EJS_emulator && window.EJS_emulator.gameManager) {
+        try {
+          if (typeof window.EJS_emulator.gameManager.rewind === 'function') {
+            window.EJS_emulator.gameManager.rewind();
+            return true;
+          }
+        } catch (_) {}
+      }
       if (mode === 'homebrew' && rewindBuffer.length > 5) {
         const snap = rewindBuffer.splice(-12, 12)[0];
         if (snap) {
@@ -182,7 +263,10 @@
           const bytes = window.EJS_emulator.gameManager.getState();
           if (bytes) {
             let bin = '';
-            for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+            const chunk = 8192;
+            for (let i = 0; i < bytes.length; i += chunk) {
+              bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+            }
             return JSON.stringify({ ejs: btoa(bin) });
           }
         } catch (_) {}
@@ -219,7 +303,7 @@
     }
   };
 
-  // --- Built-in 60fps Interactive Homebrew Engine ---
+  // --- Built-in 60fps Interactive Homebrew Cartridge Engine ---
   const hbCanvas = document.getElementById('hbCanvas');
   const ctx = hbCanvas.getContext('2d');
   let rewindBuffer = [];
@@ -262,10 +346,12 @@
       grounded: false
     };
 
+    notifyStatus('running', '');
     if (!animId) loop();
   }
 
   function stepHomebrew() {
+    if (paused) return;
     state.ticks++;
     if (state.ticks % 4 === 0) {
       rewindBuffer.push(JSON.parse(JSON.stringify(state)));
@@ -317,7 +403,6 @@
       });
       state.stars.forEach(s => { s.x -= 1.2; if (s.x < 0) s.x = 320; });
     } else {
-      // Platformer (Brick Jump)
       if (keys.left) state.vx = -2.8;
       else if (keys.right) state.vx = 2.8;
       else state.vx *= 0.72;
@@ -350,7 +435,6 @@
     ctx.clearRect(0, 0, w, h);
 
     if (cartridgeMode === 'racer' || cartridgeMode === 'kart') {
-      // Synthwave Sunset Sky
       const sky = ctx.createLinearGradient(0, 0, 0, 118);
       sky.addColorStop(0, '#12082E');
       sky.addColorStop(0.55, '#8B5CF6');
@@ -358,14 +442,12 @@
       ctx.fillStyle = sky;
       ctx.fillRect(0, 0, w, 118);
 
-      // Retro Sun
       const sunGrad = ctx.createLinearGradient(0, 34, 0, 108);
       sunGrad.addColorStop(0, '#FDE047');
       sunGrad.addColorStop(1, '#EC4899');
       ctx.fillStyle = sunGrad;
       ctx.beginPath(); ctx.arc(160, 74, 34, 0, Math.PI * 2); ctx.fill();
 
-      // Horizon & Road
       ctx.fillStyle = '#0B0D18';
       ctx.fillRect(0, 118, w, 122);
       ctx.fillStyle = '#181B2C';
@@ -374,7 +456,6 @@
       ctx.lineTo(305, 240); ctx.lineTo(15, 240);
       ctx.closePath(); ctx.fill();
 
-      // Neon Road Rails & Dashed Center
       ctx.strokeStyle = '#22D3EE'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(132, 118); ctx.lineTo(15, 240); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(188, 118); ctx.lineTo(305, 240); ctx.stroke();
@@ -386,7 +467,6 @@
         ctx.fillRect(160 - 2 * t, y, 4 * t + 1, 8 * t + 2);
       }
 
-      // Rival cars / barriers
       state.obstacles.forEach(ob => {
         const t = Math.max(0.05, (ob.y - 114) / 126);
         const ox = 160 + ob.lane * 110 * t;
@@ -397,7 +477,6 @@
         ctx.fillRect(ox - ow / 3, ob.y - oh + 3 * t, ow * 0.66, 4 * t);
       });
 
-      // Player Retro Car
       ctx.fillStyle = '#22D3EE';
       ctx.fillRect(state.px - 20, 198, 40, 20);
       ctx.fillStyle = '#8B5CF6';
@@ -414,16 +493,13 @@
       ctx.fillStyle = '#E0F2FE';
       state.stars.forEach(s => ctx.fillRect(s.x, s.y, s.r, s.r));
 
-      // Glowing Moon/Planet
       const orb = ctx.createRadialGradient(240, 62, 4, 240, 62, 34);
       orb.addColorStop(0, '#F0FDFA'); orb.addColorStop(1, 'rgba(34,211,238,0)');
       ctx.fillStyle = orb; ctx.beginPath(); ctx.arc(240, 62, 34, 0, Math.PI * 2); ctx.fill();
 
-      // Mountains
       ctx.fillStyle = '#091526';
       ctx.beginPath(); ctx.moveTo(0, 240); ctx.lineTo(0, 190); ctx.lineTo(110, 155); ctx.lineTo(220, 195); ctx.lineTo(320, 145); ctx.lineTo(320, 240); ctx.fill();
 
-      // Enemies
       state.obstacles.forEach(ob => {
         ctx.fillStyle = '#F43F5E';
         ctx.beginPath(); ctx.arc(ob.x, ob.y, 10, 0, Math.PI * 2); ctx.fill();
@@ -431,11 +507,9 @@
         ctx.fillRect(ob.x - 4, ob.y - 2, 8, 4);
       });
 
-      // Bullets
       ctx.fillStyle = '#22D3EE';
       state.bullets.forEach(b => ctx.fillRect(b.x, b.y - 1.5, 10, 3));
 
-      // Ship
       ctx.fillStyle = '#8B5CF6';
       ctx.beginPath();
       ctx.moveTo(state.px + 14, state.py);
@@ -446,7 +520,6 @@
       ctx.fillStyle = '#34D399';
       ctx.fillRect(state.px - 14, state.py - 2, 6, 4);
     } else {
-      // Platformer
       const bg = ctx.createLinearGradient(0, 0, 0, h);
       bg.addColorStop(0, '#1E1108'); bg.addColorStop(1, '#3B1E08');
       ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h);
@@ -472,7 +545,6 @@
       ctx.fillRect(state.px + 2, state.py - 8, 3, 3);
     }
 
-    // Minimal Retro HUD
     ctx.fillStyle = 'rgba(7,8,13,0.62)';
     ctx.fillRect(8, 8, 130, 18);
     ctx.fillStyle = '#E2E8F0';
@@ -501,24 +573,56 @@
     bootHomebrew: function(title, sys, kind) {
       initHomebrew(title, sys, kind);
     },
-    bootRom: function(romUrl, core, title) {
+    bootRom: function(config) {
       if (animId) { cancelAnimationFrame(animId); animId = null; }
       mode = 'emulatorjs';
-      gameTitle = title;
+      gameTitle = config.title || 'RetroVerse';
       hbCanvas.style.display = 'none';
       const gameDiv = document.getElementById('game');
       gameDiv.style.display = 'flex';
       gameDiv.innerHTML = '';
 
+      notifyStatus('loading', config.core || 'auto');
+
+      const core = config.core || 'nes';
+      const useThreads = (core === 'psp' || core === 'ppsspp')
+        ? (typeof SharedArrayBuffer !== 'undefined')
+        : (!!config.threads && typeof SharedArrayBuffer !== 'undefined');
+
+      if ((core === 'psp' || core === 'ppsspp') && typeof SharedArrayBuffer === 'undefined') {
+        notifyStatus('error', 'PSP_NO_SAB');
+        return;
+      }
+
       window.EJS_player = '#game';
-      window.EJS_core = core || 'nes';
-      window.EJS_gameUrl = romUrl;
-      window.EJS_gameName = title || 'RetroVerse';
+      window.EJS_core = core;
+      window.EJS_gameUrl = config.romUrl;
+      window.EJS_gameName = gameTitle;
       window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
       window.EJS_startOnLoaded = true;
+      window.EJS_threads = useThreads;
       window.EJS_color = '#8B5CF6';
       window.EJS_VirtualGamepadSettings = [];
+      if (config.biosUrl) {
+        window.EJS_biosUrl = config.biosUrl;
+      }
+      if (config.cheats) {
+        window.EJS_cheats = [[0, config.cheats]];
+      }
+      window.EJS_defaultOptions = {
+        'shader': config.shader || 'disabled',
+        'rewind-enabled': config.rewind ? 'enabled' : 'disabled',
+        'vsync': config.vsync ? 'enabled' : 'disabled',
+        'ff-ratio': String(config.ffSpeed || 2) + '.0x',
+        'save-state-location': 'browser'
+      };
       window.EJS_onGameStart = function() {
+        notifyStatus('running', core);
+        try {
+          if (window.EJS_emulator && typeof window.EJS_emulator.setVolume === 'function') {
+            window.EJS_emulator.setVolume(audioVol);
+          }
+        } catch (_) {}
         if (window.RetroHost && window.RetroHost.onFpsUpdate) {
           window.RetroHost.onFpsUpdate(60);
         }
@@ -530,15 +634,11 @@
       script.id = 'ejs-loader-script';
       script.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
       script.onerror = function() {
-        // Offline / CDN unreachable fallback -> run built-in playable cartridge so UI never breaks
-        initHomebrew(title, (core || 'RETRO').toUpperCase(), 'space');
+        notifyStatus('error', 'CDN_LOAD_FAILED');
       };
       document.body.appendChild(script);
     }
   };
-
-  // Boot default showcase cartridge immediately on load
-  initHomebrew('Crash Racer', 'PS1', 'racer');
 })();
 </script>
 </body>

@@ -51,7 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.GameEntity
 import com.example.model.RetroSystem
-import com.example.ui.components.ProceduralCoverArt
+import com.example.ui.components.GameCoverArtwork
 import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.LocalAppStrings
 import com.example.ui.theme.PrimaryPurple
@@ -159,8 +159,10 @@ fun HomeScreen(
                         .border(1.dp, BorderSubtle, RoundedCornerShape(26.dp))
                         .clickable { onPlayGame(featuredGame) }
                 ) {
-                    ProceduralCoverArt(
+                    GameCoverArtwork(
+                        coverUrl = featuredGame.coverUrl,
                         styleIndex = featuredGame.coverStyleIndex,
+                        contentDescription = featuredGame.title,
                         modifier = Modifier.fillMaxSize()
                     )
 
@@ -337,8 +339,10 @@ fun HomeScreen(
                                 .clip(RoundedCornerShape(20.dp))
                                 .border(1.dp, BorderSubtle, RoundedCornerShape(20.dp))
                         ) {
-                            ProceduralCoverArt(
+                            GameCoverArtwork(
+                                coverUrl = game.coverUrl,
                                 styleIndex = game.coverStyleIndex,
+                                contentDescription = game.title,
                                 modifier = Modifier.fillMaxSize()
                             )
                         }

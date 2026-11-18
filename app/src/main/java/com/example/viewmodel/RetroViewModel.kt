@@ -330,12 +330,70 @@ class RetroViewModel(application: Application) : AndroidViewModel(application) {
     fun updateFilterMode(filter: String) = viewModelScope.launch { settingsRepo.updateFilterMode(filter) }
     fun updateScanlines(enabled: Boolean) = viewModelScope.launch { settingsRepo.updateScanlines(enabled) }
     fun updateAspectRatio(ratio: String) = viewModelScope.launch { settingsRepo.updateAspectRatio(ratio) }
+    fun updateResolutionScale(scale: Int) = viewModelScope.launch { settingsRepo.updateResolutionScale(scale) }
+    fun updateShowFps(show: Boolean) = viewModelScope.launch { settingsRepo.updateShowFps(show) }
+    fun updateFrameSkip(skip: Int) = viewModelScope.launch { settingsRepo.updateFrameSkip(skip) }
+    fun updateVsync(enabled: Boolean) = viewModelScope.launch { settingsRepo.updateVsync(enabled) }
     fun updateSoundVolume(vol: Float) = viewModelScope.launch { settingsRepo.updateSoundVolume(vol) }
+    fun updateAudioLatency(lat: String) = viewModelScope.launch { settingsRepo.updateAudioLatency(lat) }
     fun updateControlsOpacity(op: Float) = viewModelScope.launch { settingsRepo.updateControlsOpacity(op) }
     fun updateControlsScale(sc: Float) = viewModelScope.launch { settingsRepo.updateControlsScale(sc) }
     fun updateMoveControls(enabled: Boolean) = viewModelScope.launch { settingsRepo.updateMoveControls(enabled) }
+    fun updateHaptics(enabled: Boolean) = viewModelScope.launch { settingsRepo.updateHaptics(enabled) }
     fun updateSelectedCore(core: String) = viewModelScope.launch { settingsRepo.updateSelectedCore(core) }
+    fun updateWasmThreads(enabled: Boolean) = viewModelScope.launch { settingsRepo.updateWasmThreads(enabled) }
+    fun updateRewindEnabled(enabled: Boolean) = viewModelScope.launch { settingsRepo.updateRewindEnabled(enabled) }
+    fun updateFastForwardSpeed(speed: Int) = viewModelScope.launch { settingsRepo.updateFastForwardSpeed(speed) }
+    fun updateAutoSaveOnExit(enabled: Boolean) = viewModelScope.launch { settingsRepo.updateAutoSaveOnExit(enabled) }
     fun updateCheatsEnabled(enabled: Boolean) = viewModelScope.launch { settingsRepo.updateCheatsEnabled(enabled) }
     fun updateCheatCodes(codes: String) = viewModelScope.launch { settingsRepo.updateCheatCodes(codes) }
     fun updatePspWarning(enabled: Boolean) = viewModelScope.launch { settingsRepo.updatePspWarning(enabled) }
+
+    fun updateGameCoverUrl(gameId: Long, coverUrl: String?) {
+        viewModelScope.launch {
+            gameRepo.updateCoverUrl(gameId, coverUrl)
+            val isAr = settings.value.language == "ar"
+            showToast(if (isAr) "تم تحديث غلاف اللعبة" else "Game cover updated")
+        }
+    }
+
+    fun importBiosUri(systemTag: String, uri: Uri) {
+        viewModelScope.launch {
+            runCatching {
+                val (path, name) = gameRepo.importBiosFromUri(systemTag, uri)
+                settingsRepo.updateBios(systemTag, path, name)
+                val isAr = settings.value.language == "ar"
+                showToast(if (isAr) "تم حفظ ملف BIOS: $name" else "Saved BIOS: $name")
+                pushNotification("${systemTag.uppercase()} BIOS", name)
+            }.onFailure {
+                showToast(it.localizedMessage ?: "BIOS import failed")
+            }
+        }
+    }
+
+    fun downloadBiosFromUrl(systemTag: String, url: String) {
+        viewModelScope.launch {
+            runCatching {
+                val (path, name) = gameRepo.downloadBiosFromUrl(systemTag, url.trim())
+                settingsRepo.updateBios(systemTag, path, name)
+                val isAr = settings.value.language == "ar"
+                showToast(if (isAr) "تم تحميل وحفظ BIOS: $name" else "Downloaded BIOS: $name")
+                pushNotification("${systemTag.uppercase()} BIOS", name)
+            }.onFailure {
+                val isAr = settings.value.language == "ar"
+                showToast(
+                    if (isAr) "تعذر تحميل ملف BIOS من الرابط، تحقق من الرابط أو اختره من الهاتف"
+                    else "Failed to download BIOS URL; check URL or pick file from device"
+                )
+            }
+        }
+    }
+
+    fun clearTempCache() {
+        viewModelScope.launch {
+            gameRepo.clearTempCache()
+            val isAr = settings.value.language == "ar"
+            showToast(if (isAr) "تم مسح التخزين المؤقت بنجاح" else "Temporary cache cleared")
+        }
+    }
 }

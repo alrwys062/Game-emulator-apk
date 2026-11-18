@@ -20,5 +20,6 @@ data class GameEntity(
     val progressPercent: Float,
     val isFavorite: Boolean,
     val lastPlayedAt: Long,
-    val createdAt: Long
+    val createdAt: Long,
+    val coverUrl: String? = null
 )

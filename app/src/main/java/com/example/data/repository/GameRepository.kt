@@ -223,6 +223,51 @@ class GameRepository(
         dao.deleteGameById(game.id)
     }
 
+    suspend fun updateCoverUrl(gameId: Long, coverUrl: String?) {
+        dao.updateCoverUrl(gameId, coverUrl?.trim()?.takeIf { it.isNotEmpty() })
+    }
+
+    suspend fun importBiosFromUri(systemTag: String, uri: Uri): Pair<String, String> = withContext(Dispatchers.IO) {
+        val resolver = context.contentResolver
+        var fileName = "${systemTag}_bios.bin"
+        resolver.query(uri, null, null, null, null)?.use { cursor ->
+            val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (cursor.moveToFirst() && nameIdx >= 0) {
+                fileName = cursor.getString(nameIdx) ?: fileName
+            }
+        }
+        val biosDir = File(context.filesDir, "bios").apply { mkdirs() }
+        val safeName = "${systemTag.lowercase()}_${fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_")}"
+        val destFile = File(biosDir, safeName)
+        resolver.openInputStream(uri)?.use { input ->
+            FileOutputStream(destFile).use { output ->
+                input.copyTo(output)
+            }
+        }
+        destFile.absolutePath to fileName
+    }
+
+    suspend fun downloadBiosFromUrl(systemTag: String, url: String): Pair<String, String> = withContext(Dispatchers.IO) {
+        val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        conn.connectTimeout = 15_000
+        conn.readTimeout = 30_000
+        conn.instanceFollowRedirects = true
+        val fileName = Uri.parse(url).lastPathSegment?.takeIf { it.isNotBlank() } ?: "${systemTag}_bios.bin"
+        val biosDir = File(context.filesDir, "bios").apply { mkdirs() }
+        val safeName = "${systemTag.lowercase()}_${fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_")}"
+        val destFile = File(biosDir, safeName)
+        conn.inputStream.use { input ->
+            FileOutputStream(destFile).use { output ->
+                input.copyTo(output)
+            }
+        }
+        destFile.absolutePath to fileName
+    }
+
+    suspend fun clearTempCache() = withContext(Dispatchers.IO) {
+        runCatching { context.cacheDir.deleteRecursively() }
+    }
+
     suspend fun recordPlaySession(gameId: Long, addedMinutes: Int, newProgress: Float) {
         dao.recordPlaySession(
             id = gameId,

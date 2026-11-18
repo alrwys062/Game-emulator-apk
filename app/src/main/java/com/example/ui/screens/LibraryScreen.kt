@@ -31,15 +31,18 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -60,7 +63,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.local.GameEntity
 import com.example.model.RetroSystem
-import com.example.ui.components.ProceduralCoverArt
+import com.example.ui.components.GameCoverArtwork
 import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.ErrorRose
 import com.example.ui.theme.LocalAppStrings
@@ -86,11 +89,14 @@ fun LibraryScreen(
     onImportClick: () -> Unit,
     onPlayGame: (GameEntity) -> Unit,
     onToggleFavorite: (GameEntity) -> Unit,
+    onUpdateCoverUrl: (GameEntity, String?) -> Unit,
     onDeleteGame: (GameEntity) -> Unit
 ) {
     val strings = LocalAppStrings.current
     val isArabic = LocalIsArabic.current
     var gameToManage by remember { mutableStateOf<GameEntity?>(null) }
+    var gameForCoverDialog by remember { mutableStateOf<GameEntity?>(null) }
+    var draftCoverUrl by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier
@@ -312,8 +318,10 @@ fun LibraryScreen(
                                 .clip(RoundedCornerShape(22.dp))
                                 .border(1.dp, BorderSubtle, RoundedCornerShape(22.dp))
                         ) {
-                            ProceduralCoverArt(
+                            GameCoverArtwork(
+                                coverUrl = game.coverUrl,
                                 styleIndex = game.coverStyleIndex,
+                                contentDescription = game.title,
                                 modifier = Modifier.fillMaxSize()
                             )
 
@@ -358,6 +366,34 @@ fun LibraryScreen(
                                     )
                                 }
                             }
+
+                            // Set Cover Art URL button (48dp touch area)
+                            IconButton(
+                                onClick = {
+                                    draftCoverUrl = game.coverUrl.orEmpty()
+                                    gameForCoverDialog = game
+                                },
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(2.dp)
+                                    .size(48.dp)
+                                    .testTag("cover_url_button_${game.id}")
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.Black.copy(alpha = 0.52f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Image,
+                                        contentDescription = strings.setCoverUrlButton,
+                                        tint = SecondaryCyan,
+                                        modifier = Modifier.size(17.dp)
+                                    )
+                                }
+                            }
                         }
 
                         Spacer(Modifier.height(8.dp))
@@ -387,10 +423,29 @@ fun LibraryScreen(
             containerColor = SurfaceDark,
             title = { Text(selected.title, color = Color.White) },
             text = {
-                Text(
-                    text = "${RetroSystem.fromId(selected.systemId).shortName} • ${selected.fileName}",
-                    color = TextSecondary
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "${RetroSystem.fromId(selected.systemId).shortName} • ${selected.fileName}",
+                        color = TextSecondary
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(SurfaceElevated)
+                            .clickable {
+                                draftCoverUrl = selected.coverUrl.orEmpty()
+                                gameForCoverDialog = selected
+                                gameToManage = null
+                            }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Rounded.Image, contentDescription = null, tint = SecondaryCyan)
+                        Spacer(Modifier.width(10.dp))
+                        Text(strings.setCoverUrlButton, color = Color.White)
+                    }
+                }
             },
             confirmButton = {
                 TextButton(onClick = {
@@ -405,6 +460,80 @@ fun LibraryScreen(
             dismissButton = {
                 TextButton(onClick = { gameToManage = null }) {
                     Text(strings.close, color = TextSecondary)
+                }
+            }
+        )
+    }
+
+    gameForCoverDialog?.let { targetGame ->
+        AlertDialog(
+            onDismissRequest = { gameForCoverDialog = null },
+            containerColor = SurfaceDark,
+            title = { Text(strings.setCoverUrlTitle, color = Color.White) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(targetGame.title, style = MaterialTheme.typography.labelLarge, color = SecondaryCyan)
+                    OutlinedTextField(
+                        value = draftCoverUrl,
+                        onValueChange = { draftCoverUrl = it },
+                        placeholder = { Text(strings.setCoverUrlHint, color = TextSecondary) },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("cover_url_input")
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(SurfaceElevated)
+                            .clickable {
+                                val sysFolder = when (RetroSystem.fromId(targetGame.systemId)) {
+                                    RetroSystem.PS1 -> "Sony_-_PlayStation"
+                                    RetroSystem.PSP -> "Sony_-_PlayStation_Portable"
+                                    RetroSystem.N64 -> "Nintendo_-_Nintendo_64"
+                                    RetroSystem.SNES -> "Nintendo_-_Super_Nintendo_Entertainment_System"
+                                    RetroSystem.NES -> "Nintendo_-_Nintendo_Entertainment_System"
+                                    RetroSystem.GBA -> "Nintendo_-_Game_Boy_Advance"
+                                    RetroSystem.GBC -> "Nintendo_-_Game_Boy_Color"
+                                    RetroSystem.GB -> "Nintendo_-_Game_Boy"
+                                    RetroSystem.NDS -> "Nintendo_-_Nintendo_DS"
+                                    RetroSystem.SEGA -> "Sega_-_Mega_Drive_-_Genesis"
+                                    else -> "Nintendo_-_Nintendo_Entertainment_System"
+                                }
+                                val encoded = java.net.URLEncoder.encode(targetGame.title, "UTF-8").replace("+", "%20")
+                                draftCoverUrl = "https://thumbnails.libretro.com/$sysFolder/Named_Boxarts/$encoded.png"
+                            }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = PrimaryPurple, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(strings.autoFillLibretroCover, style = MaterialTheme.typography.labelLarge, color = Color.White)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onUpdateCoverUrl(targetGame, draftCoverUrl)
+                    gameForCoverDialog = null
+                }) {
+                    Text(strings.saveAction, color = SecondaryCyan)
+                }
+            },
+            dismissButton = {
+                Row {
+                    if (!targetGame.coverUrl.isNullOrBlank()) {
+                        TextButton(onClick = {
+                            onUpdateCoverUrl(targetGame, null)
+                            gameForCoverDialog = null
+                        }) {
+                            Text(strings.clearCoverUrl, color = ErrorRose)
+                        }
+                    }
+                    TextButton(onClick = { gameForCoverDialog = null }) {
+                        Text(strings.cancelAction, color = TextSecondary)
+                    }
                 }
             }
         )

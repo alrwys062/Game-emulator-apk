@@ -33,6 +33,9 @@ interface RetroDao {
     @Query("UPDATE games SET isFavorite = :fav WHERE id = :id")
     suspend fun setFavorite(id: Long, fav: Boolean)
 
+    @Query("UPDATE games SET coverUrl = :coverUrl WHERE id = :id")
+    suspend fun updateCoverUrl(id: Long, coverUrl: String?)
+
     @Query("UPDATE games SET lastPlayedAt = :timestamp, playTimeMinutes = playTimeMinutes + :addedMinutes, progressPercent = :progress WHERE id = :id")
     suspend fun recordPlaySession(id: Long, timestamp: Long, addedMinutes: Int, progress: Float)
 

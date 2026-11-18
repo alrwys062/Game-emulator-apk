@@ -21,7 +21,9 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -75,11 +77,20 @@ fun RetroVerseApp(viewModel: RetroViewModel) {
     val notifications by viewModel.notifications.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
+    var pendingBiosSystemTag by remember { mutableStateOf("ps1") }
 
     val romPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         uris.forEach { uri -> viewModel.importRomUri(uri) }
+    }
+
+    val biosPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.importBiosUri(pendingBiosSystemTag, uri)
+        }
     }
 
     LaunchedEffect(snackbarMessage) {
@@ -168,6 +179,7 @@ fun RetroVerseApp(viewModel: RetroViewModel) {
                                         onImportClick = { romPickerLauncher.launch(arrayOf("*/*")) },
                                         onPlayGame = viewModel::launchGame,
                                         onToggleFavorite = viewModel::toggleFavorite,
+                                        onUpdateCoverUrl = { game, url -> viewModel.updateGameCoverUrl(game.id, url) },
                                         onDeleteGame = viewModel::deleteGame
                                     )
 
@@ -183,21 +195,43 @@ fun RetroVerseApp(viewModel: RetroViewModel) {
                                         settings = settings,
                                         connectedGamepadName = connectedGamepad,
                                         onRefreshGamepads = viewModel::refreshConnectedGamepads,
+                                        onPickBiosFile = { tag ->
+                                            pendingBiosSystemTag = tag
+                                            biosPickerLauncher.launch(arrayOf("*/*"))
+                                        },
+                                        onDownloadBiosUrl = viewModel::downloadBiosFromUrl,
+                                        onOpenBiosDocs = {
+                                            viewModel.openStoreBrowser(
+                                                "Libretro BIOS Docs",
+                                                "https://docs.libretro.com/library/bios/"
+                                            )
+                                        },
                                         onUpdateFilter = viewModel::updateFilterMode,
                                         onUpdateScanlines = viewModel::updateScanlines,
                                         onUpdateAspectRatio = viewModel::updateAspectRatio,
+                                        onUpdateResolutionScale = viewModel::updateResolutionScale,
+                                        onUpdateShowFps = viewModel::updateShowFps,
+                                        onUpdateFrameSkip = viewModel::updateFrameSkip,
+                                        onUpdateVsync = viewModel::updateVsync,
                                         onUpdateSoundVolume = viewModel::updateSoundVolume,
+                                        onUpdateAudioLatency = viewModel::updateAudioLatency,
                                         onUpdateControlsOpacity = viewModel::updateControlsOpacity,
                                         onUpdateControlsScale = viewModel::updateControlsScale,
                                         onUpdateMoveControls = viewModel::updateMoveControls,
+                                        onUpdateHaptics = viewModel::updateHaptics,
                                         onUpdateSelectedCore = viewModel::updateSelectedCore,
+                                        onUpdateWasmThreads = viewModel::updateWasmThreads,
+                                        onUpdateRewindEnabled = viewModel::updateRewindEnabled,
+                                        onUpdateFastForwardSpeed = viewModel::updateFastForwardSpeed,
+                                        onUpdateAutoSaveOnExit = viewModel::updateAutoSaveOnExit,
                                         onUpdateCheatsEnabled = viewModel::updateCheatsEnabled,
                                         onUpdateCheatCodes = viewModel::updateCheatCodes,
                                         onUpdatePspWarning = viewModel::updatePspWarning,
                                         onUpdateLanguage = viewModel::updateLanguage,
                                         onUpdateThemeMode = viewModel::updateThemeMode,
                                         onUpdateUserName = viewModel::updateUserName,
-                                        onReplayOnboarding = viewModel::replayOnboarding
+                                        onReplayOnboarding = viewModel::replayOnboarding,
+                                        onClearCache = viewModel::clearTempCache
                                     )
                                 }
                             }

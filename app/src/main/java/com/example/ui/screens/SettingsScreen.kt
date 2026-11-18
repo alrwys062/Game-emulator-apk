@@ -23,18 +23,30 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.CleaningServices
+import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.DeveloperBoard
+import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.FilterVintage
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Gamepad
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.GridOn
+import androidx.compose.material.icons.rounded.Hd
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.OpenWith
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayCircleOutline
+import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.SettingsBrightness
+import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.TouchApp
+import androidx.compose.material.icons.rounded.Vibration
 import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
@@ -56,6 +68,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
@@ -78,21 +91,35 @@ fun SettingsScreen(
     settings: RetroSettings,
     connectedGamepadName: String?,
     onRefreshGamepads: () -> Unit,
+    onPickBiosFile: (systemTag: String) -> Unit,
+    onDownloadBiosUrl: (systemTag: String, url: String) -> Unit,
+    onOpenBiosDocs: () -> Unit,
     onUpdateFilter: (String) -> Unit,
     onUpdateScanlines: (Boolean) -> Unit,
     onUpdateAspectRatio: (String) -> Unit,
+    onUpdateResolutionScale: (Int) -> Unit,
+    onUpdateShowFps: (Boolean) -> Unit,
+    onUpdateFrameSkip: (Int) -> Unit,
+    onUpdateVsync: (Boolean) -> Unit,
     onUpdateSoundVolume: (Float) -> Unit,
+    onUpdateAudioLatency: (String) -> Unit,
     onUpdateControlsOpacity: (Float) -> Unit,
     onUpdateControlsScale: (Float) -> Unit,
     onUpdateMoveControls: (Boolean) -> Unit,
+    onUpdateHaptics: (Boolean) -> Unit,
     onUpdateSelectedCore: (String) -> Unit,
+    onUpdateWasmThreads: (Boolean) -> Unit,
+    onUpdateRewindEnabled: (Boolean) -> Unit,
+    onUpdateFastForwardSpeed: (Int) -> Unit,
+    onUpdateAutoSaveOnExit: (Boolean) -> Unit,
     onUpdateCheatsEnabled: (Boolean) -> Unit,
     onUpdateCheatCodes: (String) -> Unit,
     onUpdatePspWarning: (Boolean) -> Unit,
     onUpdateLanguage: (String) -> Unit,
     onUpdateThemeMode: (String) -> Unit,
     onUpdateUserName: (String) -> Unit,
-    onReplayOnboarding: () -> Unit
+    onReplayOnboarding: () -> Unit,
+    onClearCache: () -> Unit
 ) {
     val strings = LocalAppStrings.current
     var showCheatsDialog by remember { mutableStateOf(false) }
@@ -100,6 +127,8 @@ fun SettingsScreen(
     var showNameDialog by remember { mutableStateOf(false) }
     var draftName by remember(settings.userName) { mutableStateOf(settings.userName) }
     var showShortcutsDialog by remember { mutableStateOf(false) }
+    var biosDownloadTarget by remember { mutableStateOf<String?>(null) }
+    var draftBiosUrl by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         onRefreshGamepads()
@@ -128,11 +157,65 @@ fun SettingsScreen(
             }
         }
 
-        // Section 1: Graphics (الرسم)
+        // Section 0: BIOS Manager (PS1 / PS2 / Systems)
+        item {
+            SettingsGroupHeader(strings.sectionBios)
+            SettingsGroupCard {
+                BiosItemRow(
+                    title = strings.ps1BiosTitle,
+                    installedName = settings.ps1BiosName,
+                    pickLabel = strings.pickBiosFile,
+                    downloadLabel = strings.downloadBiosBtn,
+                    installedFormatter = strings.biosInstalled,
+                    notInstalledText = strings.biosNotInstalled,
+                    accent = PrimaryPurple,
+                    testTagPrefix = "bios_ps1",
+                    onPick = { onPickBiosFile("ps1") },
+                    onDownload = {
+                        draftBiosUrl = ""
+                        biosDownloadTarget = "ps1"
+                    }
+                )
+                SettingsDivider()
+                BiosItemRow(
+                    title = strings.ps2BiosTitle,
+                    installedName = settings.ps2BiosName,
+                    pickLabel = strings.pickBiosFile,
+                    downloadLabel = strings.downloadBiosBtn,
+                    installedFormatter = strings.biosInstalled,
+                    notInstalledText = strings.biosNotInstalled,
+                    accent = SecondaryCyan,
+                    testTagPrefix = "bios_ps2",
+                    onPick = { onPickBiosFile("ps2") },
+                    onDownload = {
+                        draftBiosUrl = ""
+                        biosDownloadTarget = "ps2"
+                    }
+                )
+                SettingsDivider()
+                BiosItemRow(
+                    title = strings.extraBiosTitle,
+                    installedName = settings.extraBiosName,
+                    pickLabel = strings.pickBiosFile,
+                    downloadLabel = strings.downloadBiosBtn,
+                    installedFormatter = strings.biosInstalled,
+                    notInstalledText = strings.biosNotInstalled,
+                    accent = SuccessGreen,
+                    testTagPrefix = "bios_extra",
+                    onPick = { onPickBiosFile("extra") },
+                    onDownload = {
+                        draftBiosUrl = ""
+                        biosDownloadTarget = "extra"
+                    }
+                )
+            }
+        }
+
+        // Section 1: Graphics & Display
         item {
             SettingsGroupHeader(strings.sectionGraphics)
             SettingsGroupCard {
-                val filters = listOf("CRT", "Scanlines", "Sharp")
+                val filters = listOf("CRT", "Scanlines", "LCD", "Smooth", "Sharp")
                 SettingsCycleRow(
                     icon = Icons.Rounded.FilterVintage,
                     iconBg = PrimaryPurple,
@@ -153,7 +236,7 @@ fun SettingsScreen(
                     onCheckedChange = onUpdateScanlines
                 )
                 SettingsDivider()
-                val aspects = listOf("4:3", "16:9", "Original")
+                val aspects = listOf("4:3", "16:9", "Original", "Full")
                 SettingsCycleRow(
                     icon = Icons.Rounded.AspectRatio,
                     iconBg = WarningAmber,
@@ -164,10 +247,52 @@ fun SettingsScreen(
                         onUpdateAspectRatio(next)
                     }
                 )
+                SettingsDivider()
+                val scales = listOf(1, 2, 3)
+                SettingsCycleRow(
+                    icon = Icons.Rounded.Hd,
+                    iconBg = SuccessGreen,
+                    title = strings.settingResolutionScale,
+                    valueLabel = "${settings.resolutionScale}x",
+                    onClick = {
+                        val next = scales[(scales.indexOf(settings.resolutionScale) + 1) % scales.size]
+                        onUpdateResolutionScale(next)
+                    }
+                )
+                SettingsDivider()
+                SettingsToggleRow(
+                    icon = Icons.Rounded.Speed,
+                    iconBg = Color(0xFF3B82F6),
+                    title = strings.settingShowFps,
+                    checked = settings.showFps,
+                    testTag = "setting_show_fps_switch",
+                    onCheckedChange = onUpdateShowFps
+                )
+                SettingsDivider()
+                val skips = listOf(0, 1, 2)
+                SettingsCycleRow(
+                    icon = Icons.Rounded.FastForward,
+                    iconBg = Color(0xFFEC4899),
+                    title = strings.settingFrameSkip,
+                    valueLabel = if (settings.frameSkip == 0) strings.coreAuto else settings.frameSkip.toString(),
+                    onClick = {
+                        val next = skips[(skips.indexOf(settings.frameSkip) + 1) % skips.size]
+                        onUpdateFrameSkip(next)
+                    }
+                )
+                SettingsDivider()
+                SettingsToggleRow(
+                    icon = Icons.Rounded.Sync,
+                    iconBg = PrimaryPurple,
+                    title = strings.settingVsync,
+                    checked = settings.vsyncEnabled,
+                    testTag = "setting_vsync_switch",
+                    onCheckedChange = onUpdateVsync
+                )
             }
         }
 
-        // Section 2: Audio & Controls (الصوت والتحكم)
+        // Section 2: Audio & Controls
         item {
             SettingsGroupHeader(strings.sectionAudioControls)
             SettingsGroupCard {
@@ -178,6 +303,18 @@ fun SettingsScreen(
                     value = settings.soundVolume,
                     valueRange = 0f..1f,
                     onValueChange = onUpdateSoundVolume
+                )
+                SettingsDivider()
+                val latencies = listOf("Low", "Balanced", "High")
+                SettingsCycleRow(
+                    icon = Icons.Rounded.GraphicEq,
+                    iconBg = SecondaryCyan,
+                    title = strings.settingAudioLatency,
+                    valueLabel = settings.audioLatency,
+                    onClick = {
+                        val next = latencies[(latencies.indexOf(settings.audioLatency) + 1) % latencies.size]
+                        onUpdateAudioLatency(next)
+                    }
                 )
                 SettingsDivider()
                 SettingsSliderRow(
@@ -207,6 +344,15 @@ fun SettingsScreen(
                     onCheckedChange = onUpdateMoveControls
                 )
                 SettingsDivider()
+                SettingsToggleRow(
+                    icon = Icons.Rounded.Vibration,
+                    iconBg = WarningAmber,
+                    title = strings.settingHaptics,
+                    checked = settings.hapticsEnabled,
+                    testTag = "setting_haptics_switch",
+                    onCheckedChange = onUpdateHaptics
+                )
+                SettingsDivider()
                 SettingsCycleRow(
                     icon = Icons.Rounded.Gamepad,
                     iconBg = SuccessGreen,
@@ -225,11 +371,14 @@ fun SettingsScreen(
             }
         }
 
-        // Section 3: Engine (المحرك)
+        // Section 3: Engine & Performance
         item {
             SettingsGroupHeader(strings.sectionEngine)
             SettingsGroupCard {
-                val cores = listOf("auto", "nes", "snes", "gba", "psx", "psp", "n64", "mame2003")
+                val cores = listOf(
+                    "auto", "pcsx_rearmed", "mednafen_psx_hw", "psp",
+                    "nes", "snes", "gba", "nds", "n64", "segaMD", "mame2003"
+                )
                 SettingsCycleRow(
                     icon = Icons.Rounded.Memory,
                     iconBg = ErrorRose,
@@ -239,6 +388,45 @@ fun SettingsScreen(
                         val next = cores[(cores.indexOf(settings.selectedCore) + 1) % cores.size]
                         onUpdateSelectedCore(next)
                     }
+                )
+                SettingsDivider()
+                SettingsToggleRow(
+                    icon = Icons.Rounded.DeveloperBoard,
+                    iconBg = SecondaryCyan,
+                    title = strings.settingWasmThreads,
+                    checked = settings.wasmThreadsEnabled,
+                    testTag = "setting_wasm_threads_switch",
+                    onCheckedChange = onUpdateWasmThreads
+                )
+                SettingsDivider()
+                SettingsToggleRow(
+                    icon = Icons.Rounded.History,
+                    iconBg = PrimaryPurple,
+                    title = strings.settingRewind,
+                    checked = settings.rewindEnabled,
+                    testTag = "setting_rewind_switch",
+                    onCheckedChange = onUpdateRewindEnabled
+                )
+                SettingsDivider()
+                val speeds = listOf(2, 3, 4)
+                SettingsCycleRow(
+                    icon = Icons.Rounded.FastForward,
+                    iconBg = SuccessGreen,
+                    title = strings.settingFastForwardSpeed,
+                    valueLabel = "${settings.fastForwardSpeed}x",
+                    onClick = {
+                        val next = speeds[(speeds.indexOf(settings.fastForwardSpeed) + 1) % speeds.size]
+                        onUpdateFastForwardSpeed(next)
+                    }
+                )
+                SettingsDivider()
+                SettingsToggleRow(
+                    icon = Icons.Rounded.Save,
+                    iconBg = Color(0xFF3B82F6),
+                    title = strings.settingAutoSaveExit,
+                    checked = settings.autoSaveOnExit,
+                    testTag = "setting_autosave_switch",
+                    onCheckedChange = onUpdateAutoSaveOnExit
                 )
                 SettingsDivider()
                 SettingsToggleRow(
@@ -264,7 +452,7 @@ fun SettingsScreen(
             }
         }
 
-        // Section 4: App (التطبيق)
+        // Section 4: App & Storage
         item {
             SettingsGroupHeader(strings.sectionApp)
             SettingsGroupCard {
@@ -312,8 +500,68 @@ fun SettingsScreen(
                     valueLabel = "",
                     onClick = onReplayOnboarding
                 )
+                SettingsDivider()
+                SettingsCycleRow(
+                    icon = Icons.Rounded.CleaningServices,
+                    iconBg = ErrorRose,
+                    title = strings.settingClearCache,
+                    valueLabel = "",
+                    onClick = onClearCache
+                )
             }
         }
+    }
+
+    biosDownloadTarget?.let { sysTag ->
+        AlertDialog(
+            onDismissRequest = { biosDownloadTarget = null },
+            containerColor = SurfaceDark,
+            title = { Text("${strings.downloadBiosUrlTitle} (${sysTag.uppercase()})", color = Color.White) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(strings.downloadBiosUrlHint, style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+                    OutlinedTextField(
+                        value = draftBiosUrl,
+                        onValueChange = { draftBiosUrl = it },
+                        placeholder = { Text("https://.../scph5501.bin", color = TextSecondary) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(SurfaceElevated)
+                            .clickable {
+                                biosDownloadTarget = null
+                                onOpenBiosDocs()
+                            }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Rounded.CloudDownload, contentDescription = null, tint = SecondaryCyan, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(strings.biosOpenDocs, style = MaterialTheme.typography.labelLarge, color = Color.White)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = draftBiosUrl.isNotBlank(),
+                    onClick = {
+                        onDownloadBiosUrl(sysTag, draftBiosUrl)
+                        biosDownloadTarget = null
+                    }
+                ) {
+                    Text(strings.downloadBiosBtn, color = SecondaryCyan)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { biosDownloadTarget = null }) {
+                    Text(strings.cancelAction, color = TextSecondary)
+                }
+            }
+        )
     }
 
     if (showCheatsDialog) {
@@ -385,6 +633,84 @@ fun SettingsScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun BiosItemRow(
+    title: String,
+    installedName: String,
+    pickLabel: String,
+    downloadLabel: String,
+    installedFormatter: (String) -> String,
+    notInstalledText: String,
+    accent: Color,
+    testTagPrefix: String,
+    onPick: () -> Unit,
+    onDownload: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SettingsIconBadge(Icons.Rounded.DeveloperBoard, accent)
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White
+                )
+                Text(
+                    text = if (installedName.isNotBlank()) installedFormatter(installedName) else notInstalledText,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (installedName.isNotBlank()) SuccessGreen else WarningAmber
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(44.dp)
+                    .testTag("${testTagPrefix}_pick")
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(SurfaceElevated)
+                    .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
+                    .clickable(onClick = onPick)
+                    .padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(Icons.Rounded.FolderOpen, contentDescription = null, tint = SecondaryCyan, modifier = Modifier.size(17.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(pickLabel, style = MaterialTheme.typography.labelLarge, color = Color.White, maxLines = 1)
+            }
+
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(44.dp)
+                    .testTag("${testTagPrefix}_download")
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Brush.horizontalGradient(listOf(PrimaryPurple, SecondaryCyan)))
+                    .clickable(onClick = onDownload)
+                    .padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(Icons.Rounded.CloudDownload, contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(downloadLabel, style = MaterialTheme.typography.labelLarge, color = Color.White, maxLines = 1)
+            }
+        }
     }
 }
 

@@ -1,6 +1,8 @@
 package com.example.ui.components
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -10,6 +12,31 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
+
+@Composable
+fun GameCoverArtwork(
+    coverUrl: String?,
+    styleIndex: Int,
+    contentDescription: String?,
+    modifier: Modifier = Modifier
+) {
+    Box(modifier = modifier) {
+        ProceduralCoverArt(
+            styleIndex = styleIndex,
+            modifier = Modifier.fillMaxSize()
+        )
+        if (!coverUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = coverUrl,
+                contentDescription = contentDescription,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+}
 
 @Composable
 fun ProceduralCoverArt(

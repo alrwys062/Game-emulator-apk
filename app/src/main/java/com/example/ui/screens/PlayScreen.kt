@@ -3,9 +3,12 @@ package com.example.ui.screens
 import android.annotation.SuppressLint
 import android.graphics.BitmapFactory
 import android.view.KeyEvent
+import android.view.View
 import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
@@ -39,12 +42,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.material.icons.rounded.CameraAlt
+import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.FastRewind
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -68,12 +76,16 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -96,12 +108,79 @@ import com.example.ui.theme.SurfaceDark
 import com.example.ui.theme.SurfaceElevated
 import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.WarningAmber
+import org.json.JSONObject
+import java.io.ByteArrayInputStream
 import java.io.File
-import java.io.FileInputStream
+import java.io.RandomAccessFile
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
+
+private fun buildLocalFileResponse(
+    file: File,
+    rangeHeader: String?
+): WebResourceResponse {
+    val totalLength = file.length()
+    val corsHeaders = mutableMapOf(
+        "Access-Control-Allow-Origin" to "*",
+        "Access-Control-Allow-Methods" to "GET, HEAD, OPTIONS",
+        "Access-Control-Allow-Headers" to "*",
+        "Cross-Origin-Resource-Policy" to "cross-origin",
+        "Accept-Ranges" to "bytes"
+    )
+
+    if (!rangeHeader.isNullOrBlank() && rangeHeader.startsWith("bytes=")) {
+        val spec = rangeHeader.removePrefix("bytes=").substringBefore(",")
+        val parts = spec.split("-")
+        val start = parts.getOrNull(0)?.toLongOrNull() ?: 0L
+        val end = parts.getOrNull(1)?.toLongOrNull()?.coerceAtMost(totalLength - 1) ?: (totalLength - 1)
+        val len = (end - start + 1).coerceAtLeast(0L)
+        val raf = RandomAccessFile(file, "r")
+        raf.seek(start)
+        val boundedStream = object : java.io.InputStream() {
+            var remaining = len
+            override fun read(): Int {
+                if (remaining <= 0) return -1
+                val b = raf.read()
+                if (b != -1) remaining--
+                return b
+            }
+
+            override fun read(b: ByteArray, off: Int, l: Int): Int {
+                if (remaining <= 0) return -1
+                val toRead = minOf(l.toLong(), remaining).toInt()
+                val n = raf.read(b, off, toRead)
+                if (n > 0) remaining -= n
+                return n
+            }
+
+            override fun close() {
+                raf.close()
+            }
+        }
+        corsHeaders["Content-Range"] = "bytes $start-$end/$totalLength"
+        corsHeaders["Content-Length"] = len.toString()
+        return WebResourceResponse(
+            "application/octet-stream",
+            null,
+            206,
+            "Partial Content",
+            corsHeaders,
+            boundedStream
+        )
+    }
+
+    corsHeaders["Content-Length"] = totalLength.toString()
+    return WebResourceResponse(
+        "application/octet-stream",
+        null,
+        200,
+        "OK",
+        corsHeaders,
+        file.inputStream()
+    )
+}
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -115,18 +194,22 @@ fun PlayScreen(
     onShowMessage: (String) -> Unit
 ) {
     val strings = LocalAppStrings.current
+    val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
     val sys = RetroSystem.fromId(game.systemId)
 
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var currentFps by remember { mutableIntStateOf(60) }
     var fastForward by remember { mutableStateOf(false) }
+    var isPaused by remember { mutableStateOf(false) }
+    var engineStatus by remember { mutableStateOf("loading") } // loading | running | error
+    var engineErrorDetail by remember { mutableStateOf("") }
     var drawerExpanded by remember { mutableStateOf(true) }
     var showPspDialog by remember(game.id) {
         mutableStateOf(sys == RetroSystem.PSP && settings.pspWarningEnabled)
     }
     var selectedSlotForAction by remember { mutableStateOf<SaveStateEntity?>(null) }
 
-    // Draggable control group offsets (used when moveControlsEnabled is true)
     var dpadOffsetX by remember { mutableFloatStateOf(0f) }
     var dpadOffsetY by remember { mutableFloatStateOf(0f) }
     var abxyOffsetX by remember { mutableFloatStateOf(0f) }
@@ -134,7 +217,55 @@ fun PlayScreen(
 
     BackHandler(onBack = onBack)
 
-    // Sync runtime settings to WebView whenever changed
+    val resolvedCore = remember(game, settings.selectedCore) {
+        if (settings.selectedCore == "auto") game.coreOverride else settings.selectedCore
+    }
+
+    fun bootEngineInWebView(view: WebView?) {
+        val wv = view ?: return
+        engineStatus = "loading"
+        engineErrorDetail = ""
+        val localRom = game.localFilePath?.let { File(it) }?.takeIf { it.exists() }
+        if (localRom != null) {
+            val romUrl = "https://retroverse.local/rom/${game.id}/${game.fileName}"
+            val biosFile = when (sys) {
+                RetroSystem.PS1 -> settings.ps1BiosPath.takeIf { it.isNotBlank() && File(it).exists() }
+                RetroSystem.PS2 -> settings.ps2BiosPath.takeIf { it.isNotBlank() && File(it).exists() }
+                else -> settings.extraBiosPath.takeIf { it.isNotBlank() && File(it).exists() }
+            }
+            val biosUrl = if (biosFile != null) "https://retroverse.local/bios/${File(biosFile).name}" else ""
+            val shaderOpt = when (settings.filterMode) {
+                "CRT" -> "crt-easymode.glslp"
+                "Scanlines" -> "crt-mattias.glslp"
+                "Smooth" -> "2xBR.glslp"
+                else -> "disabled"
+            }
+            val payload = JSONObject().apply {
+                put("romUrl", romUrl)
+                put("core", resolvedCore)
+                put("title", game.title)
+                put("biosUrl", biosUrl)
+                put("threads", settings.wasmThreadsEnabled || sys == RetroSystem.PSP)
+                put("shader", shaderOpt)
+                put("rewind", settings.rewindEnabled)
+                put("vsync", settings.vsyncEnabled)
+                put("ffSpeed", settings.fastForwardSpeed)
+                put("cheats", if (settings.cheatsEnabled) settings.cheatCodesText else "")
+            }.toString()
+            wv.evaluateJavascript("window.RetroEngine && window.RetroEngine.bootRom($payload);", null)
+        } else {
+            val safeTitle = game.title.replace("'", "")
+            wv.evaluateJavascript(
+                "window.RetroEngine && window.RetroEngine.bootHomebrew('$safeTitle', '${sys.shortName}', '${game.cartridgeMode}');",
+                null
+            )
+        }
+        wv.evaluateJavascript(
+            "window.RetroConfig && window.RetroConfig.applySettings('${settings.filterMode}', ${settings.scanlinesEnabled}, '${settings.aspectRatio}', ${settings.soundVolume});",
+            null
+        )
+    }
+
     LaunchedEffect(
         webViewRef,
         settings.filterMode,
@@ -149,6 +280,9 @@ fun PlayScreen(
     }
 
     fun sendButton(name: String, pressed: Boolean) {
+        if (pressed && settings.hapticsEnabled) {
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        }
         webViewRef?.evaluateJavascript(
             "window.RetroInput && window.RetroInput.setKey('$name', $pressed);",
             null
@@ -217,7 +351,7 @@ fun PlayScreen(
             modifier = Modifier
                 .widthIn(max = 680.dp)
                 .fillMaxWidth()
-                .height(260.dp)
+                .height(265.dp)
                 .padding(horizontal = 12.dp, vertical = 6.dp)
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color(0xFF04060A))
@@ -228,9 +362,13 @@ fun PlayScreen(
                 factory = { ctx ->
                     WebView(ctx).apply {
                         webViewRef = this
+                        setLayerType(View.LAYER_TYPE_HARDWARE, null)
                         this.settings.javaScriptEnabled = true
                         this.settings.domStorageEnabled = true
+                        this.settings.databaseEnabled = true
                         this.settings.allowFileAccess = true
+                        this.settings.allowContentAccess = true
+                        this.settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                         this.settings.mediaPlaybackRequiresUserGesture = false
 
                         addJavascriptInterface(object {
@@ -238,7 +376,17 @@ fun PlayScreen(
                             fun onFpsUpdate(fps: Int) {
                                 post { currentFps = fps }
                             }
+
+                            @JavascriptInterface
+                            fun onEngineStatus(status: String, detail: String) {
+                                post {
+                                    engineStatus = status
+                                    engineErrorDetail = detail
+                                }
+                            }
                         }, "RetroHost")
+
+                        webChromeClient = WebChromeClient()
 
                         webViewClient = object : WebViewClient() {
                             override fun shouldInterceptRequest(
@@ -246,52 +394,131 @@ fun PlayScreen(
                                 request: WebResourceRequest?
                             ): WebResourceResponse? {
                                 val u = request?.url?.toString() ?: return null
-                                if (u.startsWith("https://retroverse.local/rom/")) {
-                                    val filePath = game.localFilePath ?: return null
-                                    val f = File(filePath)
-                                    if (!f.exists()) return null
+                                val method = request.method ?: "GET"
+
+                                if (u.startsWith("https://retroverse.local/") && method.equals("OPTIONS", ignoreCase = true)) {
                                     return WebResourceResponse(
-                                        "application/octet-stream",
-                                        null,
+                                        "text/plain",
+                                        "UTF-8",
                                         200,
                                         "OK",
                                         mapOf(
                                             "Access-Control-Allow-Origin" to "*",
-                                            "Access-Control-Allow-Methods" to "GET, OPTIONS"
+                                            "Access-Control-Allow-Methods" to "GET, HEAD, OPTIONS",
+                                            "Access-Control-Allow-Headers" to "*",
+                                            "Cross-Origin-Resource-Policy" to "cross-origin"
                                         ),
-                                        FileInputStream(f)
+                                        ByteArrayInputStream(ByteArray(0))
                                     )
                                 }
+
+                                if (u.startsWith("https://retroverse.local/emulator_host.html")) {
+                                    val htmlStream = context.assets.open("emulator_host.html")
+                                    return WebResourceResponse(
+                                        "text/html",
+                                        "UTF-8",
+                                        200,
+                                        "OK",
+                                        mapOf(
+                                            "Cross-Origin-Opener-Policy" to "same-origin",
+                                            "Cross-Origin-Embedder-Policy" to "credentialless",
+                                            "Access-Control-Allow-Origin" to "*"
+                                        ),
+                                        htmlStream
+                                    )
+                                }
+
+                                if (u.startsWith("https://retroverse.local/rom/")) {
+                                    val filePath = game.localFilePath ?: return null
+                                    val f = File(filePath)
+                                    if (!f.exists()) return null
+                                    return buildLocalFileResponse(f, request.requestHeaders["Range"])
+                                }
+
+                                if (u.startsWith("https://retroverse.local/bios/")) {
+                                    val biosPath = when (sys) {
+                                        RetroSystem.PS1 -> settings.ps1BiosPath
+                                        RetroSystem.PS2 -> settings.ps2BiosPath
+                                        else -> settings.extraBiosPath
+                                    }
+                                    val f = File(biosPath)
+                                    if (!f.exists()) return null
+                                    return buildLocalFileResponse(f, request.requestHeaders["Range"])
+                                }
+
                                 return super.shouldInterceptRequest(view, request)
                             }
 
                             override fun onPageFinished(view: WebView?, url: String?) {
-                                val safeTitle = game.title.replace("'", "")
-                                val core = if (settings.selectedCore == "auto") game.coreOverride else settings.selectedCore
-                                if (!game.localFilePath.isNullOrBlank() && File(game.localFilePath).exists()) {
-                                    val romUrl = "https://retroverse.local/rom/${game.id}/${game.fileName}"
-                                    view?.evaluateJavascript(
-                                        "window.RetroEngine && window.RetroEngine.bootRom('$romUrl', '$core', '$safeTitle');",
-                                        null
-                                    )
-                                } else {
-                                    view?.evaluateJavascript(
-                                        "window.RetroEngine && window.RetroEngine.bootHomebrew('$safeTitle', '${sys.shortName}', '${game.cartridgeMode}');",
-                                        null
-                                    )
-                                }
-                                view?.evaluateJavascript(
-                                    "window.RetroConfig && window.RetroConfig.applySettings('${settings.filterMode}', ${settings.scanlinesEnabled}, '${settings.aspectRatio}', ${settings.soundVolume});",
-                                    null
-                                )
+                                bootEngineInWebView(view)
                             }
                         }
-                        loadUrl("file:///android_asset/emulator_host.html")
+                        loadUrl("https://retroverse.local/emulator_host.html")
                     }
                 }
             )
 
-            // Top HUD Overlay: Back button & FPS badge
+            // Loading / Error Overlay for real EmulatorJS cores
+            if (engineStatus == "loading") {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xD907080D)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = SecondaryCyan, strokeWidth = 3.dp)
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            text = strings.engineLoadingText(resolvedCore.uppercase()),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Color.White
+                        )
+                    }
+                }
+            } else if (engineStatus == "error") {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xEB07080D))
+                        .padding(20.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Rounded.ErrorOutline,
+                            contentDescription = null,
+                            tint = WarningAmber,
+                            modifier = Modifier.size(34.dp)
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = strings.engineErrorTitle,
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = Color.White
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = if (engineErrorDetail == "PSP_NO_SAB") strings.engineErrorNoSab else strings.engineErrorCdn,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextSecondary,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Brush.horizontalGradient(listOf(PrimaryPurple, SecondaryCyan)))
+                                .clickable { bootEngineInWebView(webViewRef) }
+                                .padding(horizontal = 18.dp, vertical = 8.dp)
+                        ) {
+                            Text(strings.retryBtn, color = Color.White, style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
+                }
+            }
+
+            // Top HUD Overlay: Back, Pause/Reset, FPS badge
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -299,41 +526,82 @@ fun PlayScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(
-                    onClick = onBack,
-                    modifier = Modifier
-                        .size(40.dp)
-                        .testTag("play_back_button")
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.55f))
-                        .border(1.dp, BorderGlass, CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
-                        contentDescription = strings.close,
-                        tint = Color.White
-                    )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier
+                            .size(38.dp)
+                            .testTag("play_back_button")
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.58f))
+                            .border(1.dp, BorderGlass, CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
+                            contentDescription = strings.close,
+                            tint = Color.White
+                        )
+                    }
+
+                    IconButton(
+                        onClick = {
+                            isPaused = !isPaused
+                            webViewRef?.evaluateJavascript("window.RetroConfig && window.RetroConfig.togglePause();", null)
+                        },
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.58f))
+                            .border(1.dp, BorderGlass, CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = if (isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
+                            contentDescription = if (isPaused) strings.actionResume else strings.actionPause,
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = {
+                            webViewRef?.evaluateJavascript("window.RetroConfig && window.RetroConfig.resetGame();", null)
+                        },
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.58f))
+                            .border(1.dp, BorderGlass, CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = strings.actionReset,
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Color.Black.copy(alpha = 0.58f))
-                            .border(1.dp, BorderGlass, RoundedCornerShape(10.dp))
-                            .padding(horizontal = 10.dp, vertical = 5.dp)
-                    ) {
-                        Text(
-                            text = "${sys.shortName} $currentFps",
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                fontFamily = JetBrainsMonoFontFamily,
-                                fontWeight = FontWeight.Bold
-                            ),
-                            color = SecondaryCyan
-                        )
+                    if (settings.showFps) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.Black.copy(alpha = 0.58f))
+                                .border(1.dp, BorderGlass, RoundedCornerShape(10.dp))
+                                .padding(horizontal = 10.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                text = "${sys.shortName} $currentFps",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = SecondaryCyan
+                            )
+                        }
                     }
 
                     Box(
@@ -355,7 +623,7 @@ fun PlayScreen(
             }
         }
 
-        // Virtual Touch Controller Deck (Always LTR physically so D-Pad is left and ABXY is right!)
+        // Virtual Touch Controller Deck (Physically LTR)
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
             Column(
                 modifier = Modifier
@@ -366,7 +634,6 @@ fun PlayScreen(
                     .padding(horizontal = 18.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // Shoulder buttons L1 / R1
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -375,7 +642,6 @@ fun PlayScreen(
                     ShoulderButton("R1", onPressChange = { sendButton("r1", it) })
                 }
 
-                // D-Pad + ABXY Cluster
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -384,7 +650,6 @@ fun PlayScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // D-Pad
                     Box(
                         modifier = Modifier
                             .offset { IntOffset(dpadOffsetX.roundToInt(), dpadOffsetY.roundToInt()) }
@@ -404,7 +669,6 @@ fun PlayScreen(
                         DpadCluster(onDirection = { dir, down -> sendButton(dir, down) })
                     }
 
-                    // Y X B A Diamond
                     Box(
                         modifier = Modifier
                             .offset { IntOffset(abxyOffsetX.roundToInt(), abxyOffsetY.roundToInt()) }
@@ -425,7 +689,6 @@ fun PlayScreen(
                     }
                 }
 
-                // Select & Start Center Pills
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -447,14 +710,9 @@ fun PlayScreen(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
                 .background(SurfaceDark)
-                .border(
-                    1.dp,
-                    BorderSubtle,
-                    RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
-                )
+                .border(1.dp, BorderSubtle, RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
                 .padding(horizontal = 16.dp, vertical = 10.dp)
         ) {
-            // Drag Handle + Header
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -477,7 +735,6 @@ fun PlayScreen(
 
             Spacer(Modifier.height(8.dp))
 
-            // 4 Quick Actions Row (Save, Rewind, Fast Forward, Screenshot)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -504,12 +761,12 @@ fun PlayScreen(
                 )
                 QuickActionTile(
                     icon = Icons.Rounded.FastForward,
-                    label = strings.actionFastForward,
+                    label = "${strings.actionFastForward} ${settings.fastForwardSpeed}x",
                     active = fastForward,
                     modifier = Modifier.weight(1f),
                     onClick = {
                         fastForward = !fastForward
-                        val mult = if (fastForward) 2 else 1
+                        val mult = if (fastForward) settings.fastForwardSpeed else 1
                         webViewRef?.evaluateJavascript(
                             "window.RetroConfig && window.RetroConfig.setSpeed($mult);",
                             null
@@ -532,13 +789,12 @@ fun PlayScreen(
                 )
             }
 
-            // 5 Save Slots List
             AnimatedVisibility(visible = drawerExpanded) {
                 val slotMap = remember(saveStates) { saveStates.associateBy { it.slotIndex } }
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(172.dp)
+                        .height(166.dp)
                         .padding(top = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
