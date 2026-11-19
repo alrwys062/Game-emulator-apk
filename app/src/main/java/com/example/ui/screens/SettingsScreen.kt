@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -22,18 +21,20 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.AspectRatio
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Backup
 import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.CleaningServices
-import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.ColorLens
 import androidx.compose.material.icons.rounded.DeveloperBoard
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.FilterVintage
-import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Gamepad
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.GridOn
-import androidx.compose.material.icons.rounded.Hd
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Memory
@@ -42,12 +43,16 @@ import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayCircleOutline
 import androidx.compose.material.icons.rounded.Save
+import androidx.compose.material.icons.rounded.ScreenLockRotation
 import androidx.compose.material.icons.rounded.SettingsBrightness
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Vibration
+import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.WbSunny
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -68,16 +73,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.data.preferences.RetroSettings
+import com.example.model.RetroSystem
+import com.example.service.AiPerfRecommendation
+import com.example.service.DeviceSpecSummary
+import com.example.service.RomBundler
+import com.example.ui.theme.AccentPreset
 import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.ErrorRose
 import com.example.ui.theme.LocalAppStrings
+import com.example.ui.theme.LocalIsArabic
 import com.example.ui.theme.PrimaryPurple
 import com.example.ui.theme.SecondaryCyan
 import com.example.ui.theme.SuccessGreen
@@ -85,53 +95,102 @@ import com.example.ui.theme.SurfaceDark
 import com.example.ui.theme.SurfaceElevated
 import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.WarningAmber
+import com.example.viewmodel.AiChatMessage
 
 @Composable
 fun SettingsScreen(
     settings: RetroSettings,
+    deviceSpec: DeviceSpecSummary,
     connectedGamepadName: String?,
+    storageUsedBytes: Long,
+    lastDiagnosticLogs: String,
+    aiBusy: Boolean,
+    aiPerfRec: AiPerfRecommendation?,
+    aiChatMessages: List<AiChatMessage>,
     onRefreshGamepads: () -> Unit,
-    onPickBiosFile: (systemTag: String) -> Unit,
-    onDownloadBiosUrl: (systemTag: String, url: String) -> Unit,
+    onRefreshStorage: () -> Unit,
+    onPickBiosFile: (slotKey: String) -> Unit,
+    onDownloadBiosUrl: (slotKey: String, url: String) -> Unit,
+    onRemoveBios: (slotKey: String) -> Unit,
     onOpenBiosDocs: () -> Unit,
+    onRunEngineTest: () -> Unit,
     onUpdateFilter: (String) -> Unit,
     onUpdateScanlines: (Boolean) -> Unit,
     onUpdateAspectRatio: (String) -> Unit,
     onUpdateResolutionScale: (Int) -> Unit,
+    onUpdateRenderScalePercent: (Int) -> Unit,
     onUpdateShowFps: (Boolean) -> Unit,
+    onUpdateOrientationLock: (String) -> Unit,
+    onUpdateWakeLock: (Boolean) -> Unit,
+    onApplyPerfPreset: (String) -> Unit,
     onUpdateFrameSkip: (Int) -> Unit,
     onUpdateVsync: (Boolean) -> Unit,
+    onUpdateFpsCap: (Int) -> Unit,
+    onUpdateSmartPerf: (Boolean) -> Unit,
+    onUpdatePreloadRoms: (Boolean) -> Unit,
+    onUpdateSelectedCore: (String) -> Unit,
+    onUpdateThreadsMode: (String) -> Unit,
+    onUpdateRewindEnabled: (Boolean) -> Unit,
+    onUpdateFastForwardSpeed: (Int) -> Unit,
+    onUpdateCdnMode: (String) -> Unit,
+    onUpdateCustomDataPath: (String) -> Unit,
     onUpdateSoundVolume: (Float) -> Unit,
+    onUpdateAudioMuted: (Boolean) -> Unit,
     onUpdateAudioLatency: (String) -> Unit,
     onUpdateControlsOpacity: (Float) -> Unit,
     onUpdateControlsScale: (Float) -> Unit,
     onUpdateMoveControls: (Boolean) -> Unit,
     onUpdateHaptics: (Boolean) -> Unit,
-    onUpdateSelectedCore: (String) -> Unit,
-    onUpdateWasmThreads: (Boolean) -> Unit,
-    onUpdateRewindEnabled: (Boolean) -> Unit,
-    onUpdateFastForwardSpeed: (Int) -> Unit,
+    onUpdateAutoHideTouch: (Boolean) -> Unit,
+    onUpdateGamepadDeadzone: (Float) -> Unit,
+    onSaveKeyBinding: (playerIndex: Int, actionId: String, keyCode: Int) -> Unit,
+    onResetKeyBindings: (playerIndex: Int) -> Unit,
     onUpdateAutoSaveOnExit: (Boolean) -> Unit,
     onUpdateCheatsEnabled: (Boolean) -> Unit,
     onUpdateCheatCodes: (String) -> Unit,
     onUpdatePspWarning: (Boolean) -> Unit,
+    onSaveGeminiConfig: (apiKey: String, model: String) -> Unit,
+    onRequestAiPerfRec: () -> Unit,
+    onApplyAiPerfRec: (AiPerfRecommendation) -> Unit,
+    onSendAiChat: (String) -> Unit,
+    onExportBackup: () -> Unit,
+    onImportBackup: () -> Unit,
     onUpdateLanguage: (String) -> Unit,
     onUpdateThemeMode: (String) -> Unit,
+    onUpdateAccentPreset: (String) -> Unit,
     onUpdateUserName: (String) -> Unit,
     onReplayOnboarding: () -> Unit,
-    onClearCache: () -> Unit
+    onClearCache: () -> Unit,
+    onShowMessage: (String) -> Unit
 ) {
     val strings = LocalAppStrings.current
+    val isArabic = LocalIsArabic.current
+
+    var showBiosDialog by remember { mutableStateOf(false) }
+    var showPerfDialog by remember { mutableStateOf(false) }
+    var showGamepadDialog by remember { mutableStateOf(false) }
+    var showGeminiDialog by remember { mutableStateOf(false) }
+    var showLogsDialog by remember { mutableStateOf(false) }
     var showCheatsDialog by remember { mutableStateOf(false) }
     var draftCheats by remember(settings.cheatCodesText) { mutableStateOf(settings.cheatCodesText) }
     var showNameDialog by remember { mutableStateOf(false) }
     var draftName by remember(settings.userName) { mutableStateOf(settings.userName) }
-    var showShortcutsDialog by remember { mutableStateOf(false) }
-    var biosDownloadTarget by remember { mutableStateOf<String?>(null) }
-    var draftBiosUrl by remember { mutableStateOf("") }
+
+    val installedBiosCount = remember(settings.biosMapJson, settings.ps1BiosName, settings.ps2BiosName) {
+        RetroSystem.biosSpecs.count { spec ->
+            val entry = settings.getBiosEntry(spec.key)
+            val legacy = when (spec.key) {
+                "ps1" -> settings.ps1BiosName
+                "ps2" -> settings.ps2BiosName
+                else -> ""
+            }
+            (entry?.name?.isNotBlank() == true) || legacy.isNotBlank()
+        }
+    }
 
     LaunchedEffect(Unit) {
         onRefreshGamepads()
+        onRefreshStorage()
     }
 
     LazyColumn(
@@ -141,7 +200,6 @@ fun SettingsScreen(
         contentPadding = PaddingValues(top = 12.dp, bottom = 108.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Header
         item {
             Row(
                 modifier = Modifier
@@ -157,56 +215,44 @@ fun SettingsScreen(
             }
         }
 
-        // Section 0: BIOS Manager (PS1 / PS2 / Systems)
+        // Section 0: BIOS, Performance Engine & Gemini AI Hubs
         item {
             SettingsGroupHeader(strings.sectionBios)
             SettingsGroupCard {
-                BiosItemRow(
-                    title = strings.ps1BiosTitle,
-                    installedName = settings.ps1BiosName,
-                    pickLabel = strings.pickBiosFile,
-                    downloadLabel = strings.downloadBiosBtn,
-                    installedFormatter = strings.biosInstalled,
-                    notInstalledText = strings.biosNotInstalled,
-                    accent = PrimaryPurple,
-                    testTagPrefix = "bios_ps1",
-                    onPick = { onPickBiosFile("ps1") },
-                    onDownload = {
-                        draftBiosUrl = ""
-                        biosDownloadTarget = "ps1"
-                    }
+                SettingsCycleRow(
+                    icon = Icons.Rounded.DeveloperBoard,
+                    iconBg = PrimaryPurple,
+                    title = strings.sectionBios,
+                    valueLabel = "$installedBiosCount / ${RetroSystem.biosSpecs.size}",
+                    testTag = "settings_bios_hub",
+                    onClick = { showBiosDialog = true }
                 )
                 SettingsDivider()
-                BiosItemRow(
-                    title = strings.ps2BiosTitle,
-                    installedName = settings.ps2BiosName,
-                    pickLabel = strings.pickBiosFile,
-                    downloadLabel = strings.downloadBiosBtn,
-                    installedFormatter = strings.biosInstalled,
-                    notInstalledText = strings.biosNotInstalled,
-                    accent = SecondaryCyan,
-                    testTagPrefix = "bios_ps2",
-                    onPick = { onPickBiosFile("ps2") },
-                    onDownload = {
-                        draftBiosUrl = ""
-                        biosDownloadTarget = "ps2"
-                    }
+                SettingsCycleRow(
+                    icon = Icons.Rounded.Speed,
+                    iconBg = SecondaryCyan,
+                    title = strings.sectionEngine,
+                    valueLabel = "${settings.performancePreset.uppercase()} • ${settings.cdnMode}",
+                    testTag = "settings_perf_hub",
+                    onClick = { showPerfDialog = true }
                 )
                 SettingsDivider()
-                BiosItemRow(
-                    title = strings.extraBiosTitle,
-                    installedName = settings.extraBiosName,
-                    pickLabel = strings.pickBiosFile,
-                    downloadLabel = strings.downloadBiosBtn,
-                    installedFormatter = strings.biosInstalled,
-                    notInstalledText = strings.biosNotInstalled,
-                    accent = SuccessGreen,
-                    testTagPrefix = "bios_extra",
-                    onPick = { onPickBiosFile("extra") },
-                    onDownload = {
-                        draftBiosUrl = ""
-                        biosDownloadTarget = "extra"
-                    }
+                SettingsCycleRow(
+                    icon = Icons.Rounded.PlayCircleOutline,
+                    iconBg = SuccessGreen,
+                    title = strings.engineTestBtn,
+                    valueLabel = "NES",
+                    testTag = "settings_engine_test",
+                    onClick = onRunEngineTest
+                )
+                SettingsDivider()
+                SettingsCycleRow(
+                    icon = Icons.Rounded.AutoAwesome,
+                    iconBg = Color(0xFFEC4899),
+                    title = strings.aiAssistantTitle,
+                    valueLabel = if (settings.geminiApiKey.isNotBlank()) settings.geminiModel else (if (isArabic) "غير مُعد" else "Setup"),
+                    testTag = "settings_gemini_hub",
+                    onClick = { showGeminiDialog = true }
                 )
             }
         }
@@ -215,7 +261,7 @@ fun SettingsScreen(
         item {
             SettingsGroupHeader(strings.sectionGraphics)
             SettingsGroupCard {
-                val filters = listOf("CRT", "Scanlines", "LCD", "Smooth", "Sharp")
+                val filters = listOf("Sharp", "Smooth", "CRT", "Scanlines", "LCD")
                 SettingsCycleRow(
                     icon = Icons.Rounded.FilterVintage,
                     iconBg = PrimaryPurple,
@@ -236,7 +282,7 @@ fun SettingsScreen(
                     onCheckedChange = onUpdateScanlines
                 )
                 SettingsDivider()
-                val aspects = listOf("4:3", "16:9", "Original", "Full")
+                val aspects = listOf("Original", "4:3", "16:9", "Full")
                 SettingsCycleRow(
                     icon = Icons.Rounded.AspectRatio,
                     iconBg = WarningAmber,
@@ -248,16 +294,25 @@ fun SettingsScreen(
                     }
                 )
                 SettingsDivider()
-                val scales = listOf(1, 2, 3)
+                val orientations = listOf("auto", "portrait", "landscape")
                 SettingsCycleRow(
-                    icon = Icons.Rounded.Hd,
-                    iconBg = SuccessGreen,
-                    title = strings.settingResolutionScale,
-                    valueLabel = "${settings.resolutionScale}x",
+                    icon = Icons.Rounded.ScreenLockRotation,
+                    iconBg = PrimaryPurple,
+                    title = if (isArabic) "اتجاه الشاشة أثناء اللعب" else "Play Orientation Lock",
+                    valueLabel = settings.orientationLock.uppercase(),
                     onClick = {
-                        val next = scales[(scales.indexOf(settings.resolutionScale) + 1) % scales.size]
-                        onUpdateResolutionScale(next)
+                        val next = orientations[(orientations.indexOf(settings.orientationLock) + 1) % orientations.size]
+                        onUpdateOrientationLock(next)
                     }
+                )
+                SettingsDivider()
+                SettingsToggleRow(
+                    icon = Icons.Rounded.WbSunny,
+                    iconBg = WarningAmber,
+                    title = if (isArabic) "إبقاء الشاشة مضاءة أثناء اللعب" else "Keep Screen Awake",
+                    checked = settings.wakeLockEnabled,
+                    testTag = "setting_wakelock_switch",
+                    onCheckedChange = onUpdateWakeLock
                 )
                 SettingsDivider()
                 SettingsToggleRow(
@@ -267,18 +322,6 @@ fun SettingsScreen(
                     checked = settings.showFps,
                     testTag = "setting_show_fps_switch",
                     onCheckedChange = onUpdateShowFps
-                )
-                SettingsDivider()
-                val skips = listOf(0, 1, 2)
-                SettingsCycleRow(
-                    icon = Icons.Rounded.FastForward,
-                    iconBg = Color(0xFFEC4899),
-                    title = strings.settingFrameSkip,
-                    valueLabel = if (settings.frameSkip == 0) strings.coreAuto else settings.frameSkip.toString(),
-                    onClick = {
-                        val next = skips[(skips.indexOf(settings.frameSkip) + 1) % skips.size]
-                        onUpdateFrameSkip(next)
-                    }
                 )
                 SettingsDivider()
                 SettingsToggleRow(
@@ -303,6 +346,15 @@ fun SettingsScreen(
                     value = settings.soundVolume,
                     valueRange = 0f..1f,
                     onValueChange = onUpdateSoundVolume
+                )
+                SettingsDivider()
+                SettingsToggleRow(
+                    icon = Icons.Rounded.VolumeOff,
+                    iconBg = ErrorRose,
+                    title = if (isArabic) "كتم الصوت" else "Mute Audio",
+                    checked = settings.audioMuted,
+                    testTag = "setting_mute_switch",
+                    onCheckedChange = onUpdateAudioMuted
                 )
                 SettingsDivider()
                 val latencies = listOf("Low", "Balanced", "High")
@@ -356,29 +408,19 @@ fun SettingsScreen(
                 SettingsCycleRow(
                     icon = Icons.Rounded.Gamepad,
                     iconBg = SuccessGreen,
-                    title = strings.settingGamepad,
+                    title = strings.gamepadMappingTitle,
                     valueLabel = connectedGamepadName ?: strings.notConnected,
-                    onClick = onRefreshGamepads
-                )
-                SettingsDivider()
-                SettingsCycleRow(
-                    icon = Icons.Rounded.Bolt,
-                    iconBg = WarningAmber,
-                    title = strings.settingShortcuts,
-                    valueLabel = "L1+Start",
-                    onClick = { showShortcutsDialog = true }
+                    testTag = "settings_gamepad_mapping",
+                    onClick = { showGamepadDialog = true }
                 )
             }
         }
 
-        // Section 3: Engine & Performance
+        // Section 3: Engine Defaults & Cheats
         item {
-            SettingsGroupHeader(strings.sectionEngine)
+            SettingsGroupHeader(strings.playSaveSlots)
             SettingsGroupCard {
-                val cores = listOf(
-                    "auto", "pcsx_rearmed", "mednafen_psx_hw", "psp",
-                    "nes", "snes", "gba", "nds", "n64", "segaMD", "mame2003"
-                )
+                val cores = listOf("auto", "psx", "pcsx_rearmed", "psp", "nes", "snes", "gba", "nds", "n64", "segaMD", "mame2003", "fbneo")
                 SettingsCycleRow(
                     icon = Icons.Rounded.Memory,
                     iconBg = ErrorRose,
@@ -388,15 +430,6 @@ fun SettingsScreen(
                         val next = cores[(cores.indexOf(settings.selectedCore) + 1) % cores.size]
                         onUpdateSelectedCore(next)
                     }
-                )
-                SettingsDivider()
-                SettingsToggleRow(
-                    icon = Icons.Rounded.DeveloperBoard,
-                    iconBg = SecondaryCyan,
-                    title = strings.settingWasmThreads,
-                    checked = settings.wasmThreadsEnabled,
-                    testTag = "setting_wasm_threads_switch",
-                    onCheckedChange = onUpdateWasmThreads
                 )
                 SettingsDivider()
                 SettingsToggleRow(
@@ -452,7 +485,7 @@ fun SettingsScreen(
             }
         }
 
-        // Section 4: App & Storage
+        // Section 4: App, Storage & Backup
         item {
             SettingsGroupHeader(strings.sectionApp)
             SettingsGroupCard {
@@ -462,9 +495,7 @@ fun SettingsScreen(
                     title = strings.settingLanguage,
                     valueLabel = if (settings.language == "ar") strings.langArabic else strings.langEnglish,
                     testTag = "setting_language_row",
-                    onClick = {
-                        onUpdateLanguage(if (settings.language == "ar") "en" else "ar")
-                    }
+                    onClick = { onUpdateLanguage(if (settings.language == "ar") "en" else "ar") }
                 )
                 SettingsDivider()
                 val themes = listOf("dark", "oled", "neon")
@@ -485,12 +516,57 @@ fun SettingsScreen(
                     }
                 )
                 SettingsDivider()
+                val accents = AccentPreset.entries
+                val currentAccent = AccentPreset.fromId(settings.accentPreset)
+                SettingsCycleRow(
+                    icon = Icons.Rounded.ColorLens,
+                    iconBg = currentAccent.primary,
+                    title = if (isArabic) "تدرج الألوان" else "Accent Gradient",
+                    valueLabel = if (isArabic) currentAccent.labelAr else currentAccent.labelEn,
+                    onClick = {
+                        val next = accents[(accents.indexOf(currentAccent) + 1) % accents.size]
+                        onUpdateAccentPreset(next.id)
+                    }
+                )
+                SettingsDivider()
                 SettingsCycleRow(
                     icon = Icons.Rounded.Person,
                     iconBg = SuccessGreen,
                     title = strings.settingUsername,
                     valueLabel = settings.userName,
                     onClick = { showNameDialog = true }
+                )
+                SettingsDivider()
+                SettingsCycleRow(
+                    icon = Icons.Rounded.Storage,
+                    iconBg = SecondaryCyan,
+                    title = if (isArabic) "المساحة المستخدمة" else "Storage Used",
+                    valueLabel = RomBundler.formatFileSize(storageUsedBytes),
+                    onClick = onRefreshStorage
+                )
+                SettingsDivider()
+                SettingsCycleRow(
+                    icon = Icons.Rounded.Backup,
+                    iconBg = PrimaryPurple,
+                    title = if (isArabic) "تصدير نسخة احتياطية (JSON)" else "Export Settings Backup (JSON)",
+                    valueLabel = "",
+                    onClick = onExportBackup
+                )
+                SettingsDivider()
+                SettingsCycleRow(
+                    icon = Icons.Rounded.Download,
+                    iconBg = SuccessGreen,
+                    title = if (isArabic) "استيراد نسخة احتياطية (JSON)" else "Import Settings Backup (JSON)",
+                    valueLabel = "",
+                    onClick = onImportBackup
+                )
+                SettingsDivider()
+                SettingsCycleRow(
+                    icon = Icons.Rounded.BugReport,
+                    iconBg = WarningAmber,
+                    title = if (isArabic) "سجل التشخيص والأخطاء" else "Diagnostic & Error Logs",
+                    valueLabel = "",
+                    onClick = { showLogsDialog = true }
                 )
                 SettingsDivider()
                 SettingsCycleRow(
@@ -512,55 +588,67 @@ fun SettingsScreen(
         }
     }
 
-    biosDownloadTarget?.let { sysTag ->
-        AlertDialog(
-            onDismissRequest = { biosDownloadTarget = null },
-            containerColor = SurfaceDark,
-            title = { Text("${strings.downloadBiosUrlTitle} (${sysTag.uppercase()})", color = Color.White) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(strings.downloadBiosUrlHint, style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
-                    OutlinedTextField(
-                        value = draftBiosUrl,
-                        onValueChange = { draftBiosUrl = it },
-                        placeholder = { Text("https://.../scph5501.bin", color = TextSecondary) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(SurfaceElevated)
-                            .clickable {
-                                biosDownloadTarget = null
-                                onOpenBiosDocs()
-                            }
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Rounded.CloudDownload, contentDescription = null, tint = SecondaryCyan, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(strings.biosOpenDocs, style = MaterialTheme.typography.labelLarge, color = Color.White)
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = draftBiosUrl.isNotBlank(),
-                    onClick = {
-                        onDownloadBiosUrl(sysTag, draftBiosUrl)
-                        biosDownloadTarget = null
-                    }
-                ) {
-                    Text(strings.downloadBiosBtn, color = SecondaryCyan)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { biosDownloadTarget = null }) {
-                    Text(strings.cancelAction, color = TextSecondary)
-                }
-            }
+    if (showBiosDialog) {
+        BiosManagerDialog(
+            settings = settings,
+            onDismiss = { showBiosDialog = false },
+            onPickBiosFile = onPickBiosFile,
+            onDownloadBiosUrl = onDownloadBiosUrl,
+            onRemoveBios = onRemoveBios,
+            onOpenBiosDocs = onOpenBiosDocs
+        )
+    }
+
+    if (showPerfDialog) {
+        PerformanceEngineDialog(
+            settings = settings,
+            deviceSpec = deviceSpec,
+            onDismiss = { showPerfDialog = false },
+            onApplyPreset = onApplyPerfPreset,
+            onUpdateFrameSkip = onUpdateFrameSkip,
+            onUpdateResolutionScale = onUpdateResolutionScale,
+            onUpdateRenderScalePercent = onUpdateRenderScalePercent,
+            onUpdateFpsCap = onUpdateFpsCap,
+            onUpdateThreadsMode = onUpdateThreadsMode,
+            onUpdateSmartPerf = onUpdateSmartPerf,
+            onUpdatePreloadRoms = onUpdatePreloadRoms,
+            onUpdateCdnMode = onUpdateCdnMode,
+            onUpdateCustomDataPath = onUpdateCustomDataPath,
+            onRunEngineTest = onRunEngineTest
+        )
+    }
+
+    if (showGamepadDialog) {
+        GamepadMappingDialog(
+            settings = settings,
+            connectedGamepadName = connectedGamepadName,
+            onDismiss = { showGamepadDialog = false },
+            onUpdateAutoHideTouch = onUpdateAutoHideTouch,
+            onUpdateDeadzone = onUpdateGamepadDeadzone,
+            onSaveKeyBinding = onSaveKeyBinding,
+            onResetKeyBindings = onResetKeyBindings
+        )
+    }
+
+    if (showGeminiDialog) {
+        GeminiAiDialog(
+            settings = settings,
+            aiBusy = aiBusy,
+            aiPerfRec = aiPerfRec,
+            aiChatMessages = aiChatMessages,
+            onDismiss = { showGeminiDialog = false },
+            onSaveGeminiConfig = onSaveGeminiConfig,
+            onRequestPerfRec = onRequestAiPerfRec,
+            onApplyPerfRec = onApplyAiPerfRec,
+            onSendChat = onSendAiChat
+        )
+    }
+
+    if (showLogsDialog) {
+        DiagnosticLogDialog(
+            logs = lastDiagnosticLogs,
+            onDismiss = { showLogsDialog = false },
+            onShowMessage = onShowMessage
         )
     }
 
@@ -581,14 +669,10 @@ fun SettingsScreen(
                 TextButton(onClick = {
                     onUpdateCheatCodes(draftCheats)
                     showCheatsDialog = false
-                }) {
-                    Text(strings.saveAction, color = SecondaryCyan)
-                }
+                }) { Text(strings.saveAction, color = SecondaryCyan) }
             },
             dismissButton = {
-                TextButton(onClick = { showCheatsDialog = false }) {
-                    Text(strings.cancelAction, color = TextSecondary)
-                }
+                TextButton(onClick = { showCheatsDialog = false }) { Text(strings.cancelAction, color = TextSecondary) }
             }
         )
     }
@@ -599,118 +683,18 @@ fun SettingsScreen(
             containerColor = SurfaceDark,
             title = { Text(strings.editNameTitle, color = Color.White) },
             text = {
-                OutlinedTextField(
-                    value = draftName,
-                    onValueChange = { draftName = it },
-                    singleLine = true
-                )
+                OutlinedTextField(value = draftName, onValueChange = { draftName = it }, singleLine = true)
             },
             confirmButton = {
                 TextButton(onClick = {
                     onUpdateUserName(draftName)
                     showNameDialog = false
-                }) {
-                    Text(strings.saveAction, color = SecondaryCyan)
-                }
+                }) { Text(strings.saveAction, color = SecondaryCyan) }
             },
             dismissButton = {
-                TextButton(onClick = { showNameDialog = false }) {
-                    Text(strings.cancelAction, color = TextSecondary)
-                }
+                TextButton(onClick = { showNameDialog = false }) { Text(strings.cancelAction, color = TextSecondary) }
             }
         )
-    }
-
-    if (showShortcutsDialog) {
-        AlertDialog(
-            onDismissRequest = { showShortcutsDialog = false },
-            containerColor = SurfaceDark,
-            title = { Text(strings.settingShortcuts, color = Color.White) },
-            text = { Text(strings.shortcutsSummary, color = TextSecondary) },
-            confirmButton = {
-                TextButton(onClick = { showShortcutsDialog = false }) {
-                    Text(strings.close, color = SecondaryCyan)
-                }
-            }
-        )
-    }
-}
-
-@Composable
-private fun BiosItemRow(
-    title: String,
-    installedName: String,
-    pickLabel: String,
-    downloadLabel: String,
-    installedFormatter: (String) -> String,
-    notInstalledText: String,
-    accent: Color,
-    testTagPrefix: String,
-    onPick: () -> Unit,
-    onDownload: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            SettingsIconBadge(Icons.Rounded.DeveloperBoard, accent)
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = Color.White
-                )
-                Text(
-                    text = if (installedName.isNotBlank()) installedFormatter(installedName) else notInstalledText,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (installedName.isNotBlank()) SuccessGreen else WarningAmber
-                )
-            }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(44.dp)
-                    .testTag("${testTagPrefix}_pick")
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(SurfaceElevated)
-                    .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
-                    .clickable(onClick = onPick)
-                    .padding(horizontal = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Icon(Icons.Rounded.FolderOpen, contentDescription = null, tint = SecondaryCyan, modifier = Modifier.size(17.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(pickLabel, style = MaterialTheme.typography.labelLarge, color = Color.White, maxLines = 1)
-            }
-
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(44.dp)
-                    .testTag("${testTagPrefix}_download")
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Brush.horizontalGradient(listOf(PrimaryPurple, SecondaryCyan)))
-                    .clickable(onClick = onDownload)
-                    .padding(horizontal = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Icon(Icons.Rounded.CloudDownload, contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(downloadLabel, style = MaterialTheme.typography.labelLarge, color = Color.White, maxLines = 1)
-            }
-        }
     }
 }
 
@@ -748,10 +732,7 @@ private fun SettingsGroupCard(content: @Composable () -> Unit) {
 
 @Composable
 private fun SettingsDivider() {
-    HorizontalDivider(
-        color = BorderSubtle,
-        modifier = Modifier.padding(horizontal = 16.dp)
-    )
+    HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(horizontal = 16.dp))
 }
 
 @Composable
@@ -764,12 +745,7 @@ private fun SettingsIconBadge(icon: ImageVector, bgColor: Color) {
             .border(1.dp, bgColor.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
         contentAlignment = Alignment.Center
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = bgColor,
-            modifier = Modifier.size(19.dp)
-        )
+        Icon(imageVector = icon, contentDescription = null, tint = bgColor, modifier = Modifier.size(19.dp))
     }
 }
 
@@ -794,20 +770,11 @@ private fun SettingsCycleRow(
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
             SettingsIconBadge(icon, iconBg)
             Spacer(Modifier.width(12.dp))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                color = Color.White
-            )
+            Text(text = title, style = MaterialTheme.typography.titleMedium, color = Color.White)
         }
-
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (valueLabel.isNotEmpty()) {
-                Text(
-                    text = valueLabel,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary
-                )
+                Text(text = valueLabel, style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
                 Spacer(Modifier.width(4.dp))
             }
             Icon(
@@ -840,13 +807,8 @@ private fun SettingsToggleRow(
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
             SettingsIconBadge(icon, iconBg)
             Spacer(Modifier.width(12.dp))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                color = Color.White
-            )
+            Text(text = title, style = MaterialTheme.typography.titleMedium, color = Color.White)
         }
-
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
@@ -880,13 +842,8 @@ private fun SettingsSliderRow(
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(0.95f)) {
             SettingsIconBadge(icon, iconBg)
             Spacer(Modifier.width(12.dp))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                color = Color.White
-            )
+            Text(text = title, style = MaterialTheme.typography.titleMedium, color = Color.White)
         }
-
         Slider(
             value = value,
             onValueChange = onValueChange,

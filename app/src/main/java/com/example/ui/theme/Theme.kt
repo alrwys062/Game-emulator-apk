@@ -22,12 +22,24 @@ enum class AppThemeMode(val id: String) {
     }
 }
 
+enum class AccentPreset(val id: String, val primary: Color, val secondary: Color, val labelAr: String, val labelEn: String) {
+    PURPLE_CYAN("purple_cyan", Color(0xFF8B5CF6), Color(0xFF22D3EE), "بنفسجي سماوي", "Purple Cyan"),
+    CRIMSON_AMBER("crimson_amber", Color(0xFFF43F5E), Color(0xFFFBBF24), "قرمزي ذهبي", "Crimson Amber"),
+    EMERALD_TEAL("emerald_teal", Color(0xFF10B981), Color(0xFF22D3EE), "زمردي فيروزي", "Emerald Teal");
+
+    companion object {
+        fun fromId(id: String): AccentPreset = entries.firstOrNull { it.id == id } ?: PURPLE_CYAN
+    }
+}
+
 val LocalAppStrings = staticCompositionLocalOf<AppStrings> { ArabicStrings }
 val LocalIsArabic = staticCompositionLocalOf { true }
+val LocalAccentPreset = staticCompositionLocalOf { AccentPreset.PURPLE_CYAN }
 
 @Composable
 fun RetroVerseTheme(
     themeMode: AppThemeMode = AppThemeMode.DARK,
+    accentPreset: AccentPreset = AccentPreset.PURPLE_CYAN,
     isArabic: Boolean = true,
     content: @Composable () -> Unit
 ) {
@@ -48,9 +60,9 @@ fun RetroVerseTheme(
     }
 
     val colorScheme = darkColorScheme(
-        primary = PrimaryPurple,
+        primary = accentPreset.primary,
         onPrimary = Color.White,
-        secondary = SecondaryCyan,
+        secondary = accentPreset.secondary,
         onSecondary = Color(0xFF05131A),
         tertiary = SuccessGreen,
         background = bgColor,
@@ -69,7 +81,8 @@ fun RetroVerseTheme(
     CompositionLocalProvider(
         LocalLayoutDirection provides layoutDirection,
         LocalAppStrings provides strings,
-        LocalIsArabic provides isArabic
+        LocalIsArabic provides isArabic,
+        LocalAccentPreset provides accentPreset
     ) {
         MaterialTheme(
             colorScheme = colorScheme,

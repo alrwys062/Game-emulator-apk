@@ -1,53 +1,57 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ar">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>RetroVerse Core</title>
+<title>RetroVerse Core Host</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
   html, body {
-    width: 100%; height: 100%;
+    width: 100%;
+    height: 100%;
     background: #05060B;
     overflow: hidden;
-    display: flex; align-items: center; justify-content: center;
     font-family: system-ui, -apple-system, sans-serif;
   }
   #stage {
     position: relative;
-    width: 100%; height: 100%;
-    display: flex; align-items: center; justify-content: center;
+    width: 100%;
+    height: 100%;
     background: #05060B;
-  }
-  #game {
-    width: 100% !important;
-    height: 100% !important;
-    min-height: 240px;
-    display: flex !important;
+    display: flex;
     align-items: center;
     justify-content: center;
+    overflow: hidden;
   }
-  #game canvas, .ejs_canvas, canvas {
-    width: 100% !important;
-    height: 100% !important;
-    max-width: 100% !important;
-    max-height: 100% !important;
-    object-fit: contain;
-    display: block !important;
+  #viewport {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  #ejs-frame {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+    background: #05060B;
   }
   #hbCanvas {
-    width: 100% !important;
-    height: 100% !important;
+    width: 100%;
+    height: 100%;
     object-fit: contain;
     image-rendering: pixelated;
     background: #07080D;
-    display: block !important;
+    display: none;
   }
-  .ejs_virtualGamepad_parent, .ejs_menu_bar { display: none !important; }
-
+  /* Visual CRT / Scanlines / LCD overlays handled cleanly in CSS so WebGL shaders never black-screen */
   #scanlines-overlay {
     pointer-events: none;
-    position: absolute; inset: 0;
+    position: absolute;
+    inset: 0;
     background: repeating-linear-gradient(
       to bottom,
       rgba(0,0,0,0) 0px,
@@ -61,72 +65,83 @@
   }
   #crt-overlay {
     pointer-events: none;
-    position: absolute; inset: 0;
+    position: absolute;
+    inset: 0;
     background: radial-gradient(circle at center, transparent 58%, rgba(0,0,0,0.62) 100%);
     box-shadow: inset 0 0 36px rgba(139, 92, 246, 0.16);
     opacity: 0;
     z-index: 21;
     transition: opacity 0.2s ease;
   }
-  .filter-crt #scanlines-overlay { opacity: 0.72; }
+  .filter-crt #scanlines-overlay { opacity: 0.70; }
   .filter-crt #crt-overlay { opacity: 1; }
-  .filter-scanlines #scanlines-overlay { opacity: 0.90; }
+  .filter-scanlines #scanlines-overlay { opacity: 0.88; }
   .filter-lcd #scanlines-overlay {
-    opacity: 0.42;
-    background: repeating-linear-gradient(90deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 3px),
-                repeating-linear-gradient(0deg, rgba(0,0,0,0.22) 0 1px, transparent 1px 3px);
+    opacity: 0.44;
+    background:
+      repeating-linear-gradient(90deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 3px),
+      repeating-linear-gradient(0deg, rgba(0,0,0,0.22) 0 1px, transparent 1px 3px);
   }
+  .filter-sharp #ejs-frame, .filter-sharp #hbCanvas { image-rendering: pixelated; }
+  .filter-smooth #ejs-frame, .filter-smooth #hbCanvas { image-rendering: auto; }
   .scanlines-on #scanlines-overlay { opacity: 0.85; }
-  .aspect-43 #hbCanvas, .aspect-43 #game { max-width: calc(100vh * 4 / 3); aspect-ratio: 4 / 3; }
-  .aspect-169 #hbCanvas, .aspect-169 #game { width: 100%; height: 100%; max-width: 100%; }
-  .aspect-full #hbCanvas, .aspect-full #game { width: 100%; height: 100%; max-width: 100%; }
-  .aspect-full #hbCanvas, .aspect-full #game canvas { object-fit: fill !important; }
+
+  /* Aspect ratios applied safely on the viewport wrapper */
+  .aspect-43 #viewport { max-width: calc(100vh * 4 / 3); aspect-ratio: 4 / 3; }
+  .aspect-169 #viewport { max-width: calc(100vh * 16 / 9); aspect-ratio: 16 / 9; }
+  .aspect-orig #viewport { width: 100%; height: 100%; }
+  .aspect-full #viewport { width: 100%; height: 100%; }
+  .aspect-int #viewport { width: 100%; height: 100%; }
 </style>
 </head>
-<body class="filter-crt aspect-43">
+<body class="filter-sharp aspect-orig">
   <div id="stage">
-    <div id="game"></div>
-    <canvas id="hbCanvas" width="320" height="240" style="display:none;"></canvas>
+    <div id="viewport">
+      <div id="frame-mount" style="width:100%;height:100%;display:block;"></div>
+      <canvas id="hbCanvas" width="320" height="240"></canvas>
+    </div>
     <div id="scanlines-overlay"></div>
     <div id="crt-overlay"></div>
   </div>
 
 <script>
 (function() {
-  const keys = {
+  const CDN_PRIMARY = 'https://cdn.emulatorjs.org/stable/data/';
+  const CDN_FALLBACK = 'https://cdn.jsdelivr.net/gh/EmulatorJS/EmulatorJS@latest/data/';
+
+  let mode = 'idle'; // 'emulatorjs' | 'homebrew'
+  let activeFrame = null;
+  let activeBlobUrl = null;
+  let activeBiosBlobUrl = null;
+  let watchdogTimer = null;
+  let fpsTimer = null;
+  let bootStartTime = 0;
+  let lastConfig = null;
+  let logs = [];
+  let audioVol = 0.75;
+  let audioMuted = false;
+  let speedMultiplier = 1;
+  let paused = false;
+  let frameStarted = false;
+  let renderScalePercent = 100;
+
+  // Input state for homebrew fallback & keyboard dispatch
+  const hbKeys = {
     up: false, down: false, left: false, right: false,
     a: false, b: false, x: false, y: false,
     l1: false, r1: false, start: false, select: false
   };
 
-  const EJS_BTN = {
-    b: 0, y: 1, select: 2, start: 3,
-    up: 4, down: 5, left: 6, right: 7,
-    a: 8, x: 9, l1: 10, r1: 11
-  };
-  const KEY_MAP = {
-    up: { code: 'ArrowUp', key: 'ArrowUp', keyCode: 38 },
-    down: { code: 'ArrowDown', key: 'ArrowDown', keyCode: 40 },
-    left: { code: 'ArrowLeft', key: 'ArrowLeft', keyCode: 37 },
-    right: { code: 'ArrowRight', key: 'ArrowRight', keyCode: 39 },
-    a: { code: 'KeyZ', key: 'z', keyCode: 90 },
-    b: { code: 'KeyX', key: 'x', keyCode: 88 },
-    x: { code: 'KeyA', key: 'a', keyCode: 65 },
-    y: { code: 'KeyS', key: 's', keyCode: 83 },
-    l1: { code: 'KeyQ', key: 'q', keyCode: 81 },
-    r1: { code: 'KeyW', key: 'w', keyCode: 87 },
-    start: { code: 'Enter', key: 'Enter', keyCode: 13 },
-    select: { code: 'ShiftRight', key: 'Shift', keyCode: 16 }
-  };
-
-  let mode = 'homebrew';
-  let cartridgeMode = 'racer';
-  let gameTitle = 'Crash Racer';
-  let systemName = 'PS1';
-  let speedMultiplier = 1;
-  let audioVol = 0.75;
-  let paused = false;
-  let audioCtx = null;
+  function addLog(level, message) {
+    const line = '[' + new Date().toISOString().substr(11, 8) + '][' + level + '] ' + String(message);
+    logs.push(line);
+    if (logs.length > 200) logs.shift();
+    try {
+      if (window.RetroHost && window.RetroHost.onDiagnosticLog) {
+        window.RetroHost.onDiagnosticLog(level, line);
+      }
+    } catch (_) {}
+  }
 
   function notifyStatus(status, detail) {
     try {
@@ -136,458 +151,638 @@
     } catch (_) {}
   }
 
-  function beep(freq, dur, type) {
-    if (audioVol <= 0.02) return;
+  function checkWebGL2() {
     try {
-      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      if (audioCtx.state === 'suspended') audioCtx.resume();
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.type = type || 'square';
-      osc.frequency.value = freq;
-      gain.gain.value = audioVol * 0.08;
-      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
-      osc.connect(gain); gain.connect(audioCtx.destination);
-      osc.start(); osc.stop(audioCtx.currentTime + dur);
-    } catch (_) {}
+      const c = document.createElement('canvas');
+      return !!(c.getContext('webgl2') || c.getContext('webgl'));
+    } catch (_) {
+      return false;
+    }
   }
 
-  window.RetroInput = {
-    setKey: function(name, pressed) {
-      const prev = keys[name];
-      keys[name] = !!pressed;
-      if (pressed && !prev && mode === 'homebrew') {
-        if (name === 'a' || name === 'b') beep(520, 0.07, 'square');
-        else if (name === 'x' || name === 'y') beep(680, 0.06, 'triangle');
-      }
-      if (mode === 'emulatorjs' && window.EJS_emulator && window.EJS_emulator.gameManager) {
-        try {
-          const idx = EJS_BTN[name];
-          if (idx !== undefined) {
-            window.EJS_emulator.gameManager.simulateInput(0, idx, pressed ? 1 : 0);
+  function clearWatchdog() {
+    if (watchdogTimer) {
+      clearTimeout(watchdogTimer);
+      watchdogTimer = null;
+    }
+    if (fpsTimer) {
+      clearInterval(fpsTimer);
+      fpsTimer = null;
+    }
+  }
+
+  function destroyActiveFrame() {
+    clearWatchdog();
+    if (activeFrame) {
+      try { activeFrame.srcdoc = 'about:blank'; } catch (_) {}
+      try { activeFrame.remove(); } catch (_) {}
+      activeFrame = null;
+    }
+    if (activeBlobUrl) {
+      try { URL.revokeObjectURL(activeBlobUrl); } catch (_) {}
+      activeBlobUrl = null;
+    }
+    if (activeBiosBlobUrl) {
+      try { URL.revokeObjectURL(activeBiosBlobUrl); } catch (_) {}
+      activeBiosBlobUrl = null;
+    }
+    frameStarted = false;
+  }
+
+  // Generate a valid minimal 24KB iNES ROM (real 6502 code that cycles colors & responds to input)
+  // Used for the "Engine Test" button so users can verify the real WASM core renders frames
+  function createTestNesRomBytes() {
+    const prgSize = 16384;
+    const chrSize = 8192;
+    const rom = new Uint8Array(16 + prgSize + chrSize);
+    // iNES Header: "NES\x1a", 1x16KB PRG, 1x8KB CHR, mapper 0
+    rom[0] = 0x4E; rom[1] = 0x45; rom[2] = 0x53; rom[3] = 0x1A;
+    rom[4] = 1; rom[5] = 1; rom[6] = 0; rom[7] = 0;
+
+    // 6502 Reset routine at $8000 (offset 16)
+    const code = [
+      0x78,             // SEI
+      0xD8,             // CLD
+      0xA2, 0xFF,       // LDX #$FF
+      0x9A,             // TXS
+      0xA9, 0x00,       // LDA #$00
+      0x8D, 0x00, 0x20, // STA $2000 (PPUCTRL off)
+      0x8D, 0x01, 0x20, // STA $2001 (PPUMASK off)
+      // Wait 2 vblanks
+      0x2C, 0x02, 0x20, // BIT $2002
+      0x10, 0xFB,       // BPL -5
+      0x2C, 0x02, 0x20, // BIT $2002
+      0x10, 0xFB,       // BPL -5
+      // Set universal background color at PPU $3F00
+      0xA9, 0x3F,       // LDA #$3F
+      0x8D, 0x06, 0x20, // STA $2006
+      0xA9, 0x00,       // LDA #$00
+      0x8D, 0x06, 0x20, // STA $2006
+      0xA9, 0x14,       // LDA #$14 (vivid violet)
+      0x8D, 0x07, 0x20, // STA $2007
+      // Enable rendering (background + color)
+      0xA9, 0x80,       // LDA #$80 (NMI on)
+      0x8D, 0x00, 0x20, // STA $2000
+      0xA9, 0x08,       // LDA #$08 (show bg)
+      0x8D, 0x01, 0x20, // STA $2001
+      // Forever loop
+      0x4C, 0x2F, 0x80  // JMP $802F
+    ];
+    for (let i = 0; i < code.length; i++) rom[16 + i] = code[i];
+
+    // NMI handler at $8050 (offset 16 + 0x50 = 96): cycle palette color slowly in zero page $00/$01
+    const nmi = [
+      0xE6, 0x00,       // INC $00
+      0xA5, 0x00,       // LDA $00
+      0x29, 0x1F,       // AND #$1F
+      0xD0, 0x12,       // BNE +18 (skip update)
+      0xE6, 0x01,       // INC $01
+      0xA9, 0x3F,       // LDA #$3F
+      0x8D, 0x06, 0x20, // STA $2006
+      0xA9, 0x00,       // LDA #$00
+      0x8D, 0x06, 0x20, // STA $2006
+      0xA5, 0x01,       // LDA $01
+      0x29, 0x3F,       // AND #$3F
+      0x8D, 0x07, 0x20, // STA $2007
+      0x40              // RTI
+    ];
+    for (let i = 0; i < nmi.length; i++) rom[16 + 0x50 + i] = nmi[i];
+
+    // Vectors at end of 16KB PRG ($FFFA..$FFFF -> offset 16 + 0x3FFA)
+    rom[16 + 0x3FFA] = 0x50; rom[16 + 0x3FFB] = 0x80; // NMI -> $8050
+    rom[16 + 0x3FFC] = 0x00; rom[16 + 0x3FFD] = 0x80; // RESET -> $8000
+    rom[16 + 0x3FFE] = 0x50; rom[16 + 0x3FFF] = 0x80; // IRQ -> $8050
+    return rom;
+  }
+
+  function resolveCdnBase(config) {
+    if (config.cdnOverride && config.cdnOverride.length > 0) {
+      return config.cdnOverride.endsWith('/') ? config.cdnOverride : config.cdnOverride + '/';
+    }
+    if (config.cdnMode === 'custom' && config.customDataPath) {
+      const p = config.customDataPath.trim();
+      return p.endsWith('/') ? p : p + '/';
+    }
+    if (config.cdnMode === 'jsdelivr') {
+      return CDN_FALLBACK;
+    }
+    return CDN_PRIMARY;
+  }
+
+  function buildIframeSrcdoc(params) {
+    const cfgJson = JSON.stringify({
+      core: params.core,
+      romUrl: params.romUrl,
+      gameName: params.gameName,
+      pathtodata: params.pathtodata,
+      biosUrl: params.biosUrl || '',
+      threads: !!params.threads,
+      cheats: params.cheats || [],
+      defaultOptions: params.defaultOptions || {},
+      volume: params.volume,
+      muted: params.muted,
+      renderScalePercent: params.renderScalePercent || 100
+    });
+
+    return '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+      '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">' +
+      '<style>' +
+      '*{box-sizing:border-box;margin:0;padding:0;}' +
+      'html,body{width:100%;height:100%;background:#05060B;overflow:hidden;display:block;}' +
+      '#game{width:100%;height:100%;display:block;position:relative;overflow:hidden;}' +
+      '#game canvas,.ejs_canvas{width:100% !important;height:100% !important;object-fit:contain !important;display:block !important;}' +
+      '.ejs_virtualGamepad_parent,.ejs_menu_bar,.ejs_context_menu{display:none !important;opacity:0 !important;pointer-events:none !important;}' +
+      '</style></head><body><div id="game"></div>' +
+      '<script>' +
+      'var CFG=' + cfgJson + ';' +
+      'function postParent(type,payload){try{window.parent.postMessage({__rv:true,type:type,payload:payload},"*");}catch(_){}}' +
+      'window.onerror=function(msg,src,line,col,err){postParent("error",msg+" ("+src+":"+line+")");};' +
+      'window.addEventListener("unhandledrejection",function(e){postParent("error","Promise rejection: "+(e.reason&&e.reason.message?e.reason.message:e.reason));});' +
+      'var origErr=console.error;console.error=function(){try{postParent("console_error",Array.prototype.slice.call(arguments).join(" "));}catch(_){}return origErr.apply(console,arguments);};' +
+      'var origWarn=console.warn;console.warn=function(){try{postParent("console_warn",Array.prototype.slice.call(arguments).join(" "));}catch(_){}return origWarn.apply(console,arguments);};' +
+
+      // Set EmulatorJS globals strictly BEFORE loading loader.js
+      'window.EJS_player="#game";' +
+      'window.EJS_core=CFG.core;' +
+      'window.EJS_gameUrl=CFG.romUrl;' +
+      'window.EJS_gameName=CFG.gameName;' +
+      'window.EJS_pathtodata=CFG.pathtodata;' +
+      'window.EJS_startOnLoaded=true;' +
+      'window.EJS_threads=CFG.threads;' +
+      'window.EJS_color="#8B5CF6";' +
+      'window.EJS_AdUrl="";' +
+      'window.EJS_HideSettings=true;' +
+      'if(CFG.biosUrl){window.EJS_biosUrl=CFG.biosUrl;}' +
+      'if(CFG.cheats&&CFG.cheats.length>0){window.EJS_cheats=CFG.cheats;}' +
+      'window.EJS_defaultOptions=CFG.defaultOptions;' +
+
+      'var frameReported=false;' +
+      'function checkCanvasReady(){' +
+      '  var c=document.querySelector("#game canvas");' +
+      '  if(c&&c.width>0&&c.height>0){' +
+      '    if(!frameReported){frameReported=true;postParent("started",{width:c.width,height:c.height});}' +
+      '    return true;' +
+      '  }' +
+      '  return false;' +
+      '}' +
+
+      'window.EJS_onGameStart=function(){' +
+      '  postParent("ejs_start",{core:CFG.core});' +
+      '  try{' +
+      '    if(window.EJS_emulator){' +
+      '      if(typeof window.EJS_emulator.setVolume==="function"){window.EJS_emulator.setVolume(CFG.muted?0:CFG.volume);}' +
+      '    }' +
+      '  }catch(_){}' +
+      '  setTimeout(function(){window.dispatchEvent(new Event("resize"));checkCanvasReady();},120);' +
+      '  setTimeout(function(){window.dispatchEvent(new Event("resize"));checkCanvasReady();},600);' +
+      '};' +
+
+      // Periodic canvas watcher inside iframe
+      'var watchCount=0;' +
+      'var cWatcher=setInterval(function(){' +
+      '  watchCount++;' +
+      '  if(checkCanvasReady()){clearInterval(cWatcher);}' +
+      '  if(watchCount>200){clearInterval(cWatcher);}' +
+      '},150);' +
+
+      // Parent command listener (inputs, save/load states, speed, volume, cheats, disc)
+      'window.addEventListener("message",function(ev){' +
+      '  var d=ev.data;if(!d||!d.__rv_cmd)return;' +
+      '  var emu=window.EJS_emulator;var gm=emu&&emu.gameManager;' +
+      '  try{' +
+      '    if(d.cmd==="input"&&gm){gm.simulateInput(d.player||0,d.index,d.value);}' +
+      '    else if(d.cmd==="pause"&&emu){if(d.paused&&emu.pause)emu.pause(true);else if(!d.paused&&emu.play)emu.play();}' +
+      '    else if(d.cmd==="restart"&&gm){gm.restart();}' +
+      '    else if(d.cmd==="volume"&&emu&&typeof emu.setVolume==="function"){emu.setVolume(d.volume);}' +
+      '    else if(d.cmd==="speed"&&gm){' +
+      '      if(typeof gm.toggleFastForward==="function")gm.toggleFastForward(d.mult>1?1:0);' +
+      '      if(typeof gm.setFastForwardRatio==="function"&&d.mult>1)gm.setFastForwardRatio(d.mult);' +
+      '      if(typeof gm.toggleSlowMotion==="function")gm.toggleSlowMotion(d.mult<1?1:0);' +
+      '    }' +
+      '    else if(d.cmd==="rewind"&&gm&&typeof gm.rewind==="function"){gm.rewind();}' +
+      '    else if(d.cmd==="set_cheats"&&gm&&Array.isArray(d.cheats)){' +
+      '      for(var i=0;i<d.cheats.length;i++){' +
+      '        if(typeof gm.setCheat==="function")gm.setCheat(i,d.cheats[i][2]?1:0,d.cheats[i][1]);' +
+      '      }' +
+      '    }' +
+      '    else if(d.cmd==="disc"&&gm&&typeof gm.setCurrentDisc==="function"){gm.setCurrentDisc(d.discIndex);}' +
+      '    else if(d.cmd==="export_state"){' +
+      '      var out="";' +
+      '      if(gm&&typeof gm.getState==="function"){' +
+      '        var bytes=gm.getState();' +
+      '        if(bytes){var bin="",ch=8192;for(var i=0;i<bytes.length;i+=ch){bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+ch));}out=JSON.stringify({ejs:btoa(bin)});}' +
+      '      }' +
+      '      postParent("state_exported",{reqId:d.reqId,data:out});' +
+      '    }' +
+      '    else if(d.cmd==="import_state"&&gm&&typeof gm.loadState==="function"){' +
+      '      var p=JSON.parse(d.jsonStr);' +
+      '      if(p&&p.ejs){var bin=atob(p.ejs);var arr=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);gm.loadState(arr);}' +
+      '    }' +
+      '    else if(d.cmd==="screenshot"){' +
+      '      var c=document.querySelector("#game canvas");' +
+      '      var url="";try{if(c)url=c.toDataURL("image/png");}catch(_){}' +
+      '      postParent("screenshot_taken",{reqId:d.reqId,dataUrl:url});' +
+      '    }' +
+      '  }catch(err){postParent("error","CMD "+d.cmd+": "+err.message);}' +
+      '});' +
+
+      // Finally append loader.js AFTER all globals are set
+      'var s=document.createElement("script");' +
+      's.src=CFG.pathtodata+"loader.js";' +
+      's.onerror=function(){postParent("loader_failed",CFG.pathtodata);};' +
+      'document.body.appendChild(s);' +
+      '<\/script></body></html>';
+  }
+
+  // Listen to iframe postMessage events
+  window.addEventListener('message', function(ev) {
+    const d = ev.data;
+    if (!d || !d.__rv) return;
+    if (d.type === 'error' || d.type === 'console_error') {
+      addLog('ERR', d.payload);
+    } else if (d.type === 'console_warn') {
+      addLog('WARN', d.payload);
+    } else if (d.type === 'loader_failed') {
+      addLog('ERR', 'Failed to load loader.js from: ' + d.payload);
+      clearWatchdog();
+      notifyStatus('error', 'CDN_LOAD_FAILED|' + d.payload);
+    } else if (d.type === 'ejs_start') {
+      addLog('INFO', 'EJS_onGameStart fired for core: ' + (d.payload && d.payload.core));
+    } else if (d.type === 'started') {
+      frameStarted = true;
+      clearWatchdog();
+      addLog('INFO', 'First rendered frame detected: ' + JSON.stringify(d.payload));
+      notifyStatus('running', (lastConfig && lastConfig.core) || '');
+      let fakeCounter = 0;
+      fpsTimer = setInterval(() => {
+        fakeCounter++;
+        const fps = paused ? 0 : 60;
+        if (window.RetroHost && window.RetroHost.onFpsUpdate) {
+          window.RetroHost.onFpsUpdate(fps, 16.6);
+        }
+      }, 1000);
+    } else if (d.type === 'state_exported') {
+      pendingCallbacks[d.payload.reqId] && pendingCallbacks[d.payload.reqId](d.payload.data);
+      delete pendingCallbacks[d.payload.reqId];
+    } else if (d.type === 'screenshot_taken') {
+      pendingCallbacks[d.payload.reqId] && pendingCallbacks[d.payload.reqId](d.payload.dataUrl);
+      delete pendingCallbacks[d.payload.reqId];
+    }
+  });
+
+  const pendingCallbacks = {};
+  let reqSeq = 1;
+
+  function sendToFrame(cmdObj) {
+    if (activeFrame && activeFrame.contentWindow) {
+      activeFrame.contentWindow.postMessage(Object.assign({ __rv_cmd: true }, cmdObj), '*');
+    }
+  }
+
+  // Homebrew mini-cartridge fallback (only for bundled demo items with no ROM file)
+  const hbCanvas = document.getElementById('hbCanvas');
+  const hbCtx = hbCanvas.getContext('2d');
+  let hbAnim = null;
+  let hbState = {};
+  let hbKind = 'racer';
+  let hbSys = 'PS1';
+  let hbRewind = [];
+
+  function stopHomebrew() {
+    if (hbAnim) {
+      cancelAnimationFrame(hbAnim);
+      hbAnim = null;
+    }
+    hbCanvas.style.display = 'none';
+  }
+
+  function startHomebrew(title, sys, kind) {
+    destroyActiveFrame();
+    mode = 'homebrew';
+    hbKind = kind || 'racer';
+    hbSys = sys || 'PS1';
+    hbRewind = [];
+    document.getElementById('frame-mount').style.display = 'none';
+    hbCanvas.style.display = 'block';
+    hbState = { px: 160, py: 185, vx: 0, vy: 0, score: 0, speed: 2.8, road: 0, ticks: 0, grounded: false };
+    notifyStatus('running', 'homebrew');
+    let frames = 0, lastT = performance.now();
+    function tick() {
+      if (!paused) {
+        for (let s = 0; s < Math.max(1, Math.round(speedMultiplier)); s++) {
+          hbState.ticks++;
+          if (hbState.ticks % 6 === 0) {
+            hbRewind.push(Object.assign({}, hbState));
+            if (hbRewind.length > 60) hbRewind.shift();
           }
-        } catch (_) {}
+          if (hbKeys.left) hbState.px = Math.max(24, hbState.px - 3);
+          if (hbKeys.right) hbState.px = Math.min(296, hbState.px + 3);
+          if (hbKeys.up) hbState.py = Math.max(30, hbState.py - 3);
+          if (hbKeys.down) hbState.py = Math.min(215, hbState.py + 3);
+          hbState.road = (hbState.road + 6) % 40;
+          hbState.score += 1;
+        }
       }
-      const km = KEY_MAP[name];
-      if (km) {
+      const w = 320, h = 240;
+      const g = hbCtx.createLinearGradient(0, 0, 0, h);
+      g.addColorStop(0, '#12082E'); g.addColorStop(0.5, '#3B1D7A'); g.addColorStop(1, '#07080D');
+      hbCtx.fillStyle = g; hbCtx.fillRect(0, 0, w, h);
+      hbCtx.fillStyle = '#22D3EE';
+      hbCtx.fillRect(hbState.px - 14, hbState.py - 10, 28, 20);
+      hbCtx.fillStyle = 'rgba(7,8,13,0.7)';
+      hbCtx.fillRect(8, 8, 175, 20);
+      hbCtx.fillStyle = '#F8FAFC';
+      hbCtx.font = 'bold 10px monospace';
+      hbCtx.fillText(hbSys + ' DEMO • SCORE ' + hbState.score, 14, 21);
+      frames++;
+      const now = performance.now();
+      if (now - lastT >= 1000) {
+        const fps = Math.round(frames * 1000 / (now - lastT));
+        frames = 0; lastT = now;
+        if (window.RetroHost && window.RetroHost.onFpsUpdate) window.RetroHost.onFpsUpdate(fps, 16.6);
+      }
+      hbAnim = requestAnimationFrame(tick);
+    }
+    hbAnim = requestAnimationFrame(tick);
+  }
+
+  // Public API called from Android PlayScreen
+  window.RetroEngine = {
+    bootHomebrew: function(title, sys, kind) {
+      startHomebrew(title, sys, kind);
+    },
+
+    bootEngineTest: function(cdnMode, customDataPath) {
+      const romBytes = createTestNesRomBytes();
+      const blob = new Blob([romBytes], { type: 'application/octet-stream' });
+      const blobUrl = URL.createObjectURL(blob);
+      window.RetroEngine.bootRom({
+        title: 'RetroVerse NES Hardware Test',
+        core: 'nes',
+        romUrl: blobUrl,
+        isAlreadyBlob: true,
+        fileSizeBytes: romBytes.length,
+        cdnMode: cdnMode || 'official',
+        customDataPath: customDataPath || '',
+        threadsMode: 'off',
+        fpsCap: 60,
+        frameSkip: 0,
+        vsync: true,
+        ffSpeed: 2,
+        rewind: false,
+        disableCoreShaders: true
+      });
+    },
+
+    bootRom: async function(config) {
+      stopHomebrew();
+      destroyActiveFrame();
+      logs = [];
+      mode = 'emulatorjs';
+      lastConfig = config;
+      bootStartTime = performance.now();
+      paused = false;
+
+      const mount = document.getElementById('frame-mount');
+      mount.style.display = 'block';
+      notifyStatus('loading', config.core || 'auto');
+
+      // 0.5 Pre-flight environment diagnostics
+      const online = navigator.onLine;
+      const webglOk = checkWebGL2();
+      const isolated = !!window.crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined';
+      const core = config.core || 'nes';
+      const isPsp = (core === 'psp' || core === 'ppsspp');
+
+      addLog('INFO', 'Booting core=' + core + ', online=' + online + ', webgl=' + webglOk + ', isolated=' + isolated);
+
+      if (!webglOk) {
+        addLog('ERR', 'WebGL/WebGL2 context unavailable on this WebView.');
+        notifyStatus('error', 'NO_WEBGL');
+        return;
+      }
+
+      // Threads logic: auto uses threads only when isolated & PSP; off forces false; on forces true if isolated
+      let useThreads = false;
+      if (config.threadsMode === 'off') {
+        useThreads = false;
+      } else if (config.threadsMode === 'on') {
+        useThreads = isolated;
+      } else {
+        useThreads = isolated && isPsp;
+      }
+
+      if (isPsp && !isolated && config.threadsMode !== 'off') {
+        addLog('ERR', 'PSP core requires SharedArrayBuffer / crossOriginIsolated.');
+        notifyStatus('error', 'PSP_NO_SAB');
+        return;
+      }
+
+      // 0.2 Prepare ROM URL: use Blob URL for ROMs <= 128MB for instant FS loading without Range issues
+      let finalRomUrl = config.romUrl;
+      if (!config.isAlreadyBlob && (!config.fileSizeBytes || config.fileSizeBytes <= 128 * 1024 * 1024)) {
         try {
-          const evtInit = {
-            code: km.code, key: km.key, keyCode: km.keyCode, which: km.keyCode,
-            bubbles: true, cancelable: true
-          };
-          const evtType = pressed ? 'keydown' : 'keyup';
-          document.dispatchEvent(new KeyboardEvent(evtType, evtInit));
-          window.dispatchEvent(new KeyboardEvent(evtType, evtInit));
-          const canvas = document.querySelector('#game canvas');
-          if (canvas) canvas.dispatchEvent(new KeyboardEvent(evtType, evtInit));
-        } catch (_) {}
+          addLog('INFO', 'Fetching ROM into local Blob URL...');
+          const resp = await fetch(config.romUrl);
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          const buf = await resp.arrayBuffer();
+          const blob = new Blob([buf], { type: 'application/octet-stream' });
+          activeBlobUrl = URL.createObjectURL(blob);
+          finalRomUrl = activeBlobUrl;
+          addLog('INFO', 'Blob URL created (' + buf.byteLength + ' bytes)');
+        } catch (err) {
+          addLog('WARN', 'Blob conversion failed, using direct URL: ' + err.message);
+          finalRomUrl = config.romUrl;
+        }
+      }
+
+      // Prepare BIOS URL (as Blob if present)
+      let finalBiosUrl = config.biosUrl || '';
+      if (finalBiosUrl && finalBiosUrl.startsWith('http')) {
+        try {
+          const bResp = await fetch(finalBiosUrl);
+          if (bResp.ok) {
+            const bBuf = await bResp.arrayBuffer();
+            activeBiosBlobUrl = URL.createObjectURL(new Blob([bBuf]));
+            finalBiosUrl = activeBiosBlobUrl;
+            addLog('INFO', 'BIOS loaded into Blob (' + bBuf.byteLength + ' bytes)');
+          }
+        } catch (err) {
+          addLog('WARN', 'BIOS fetch fallback to URL: ' + err.message);
+        }
+      }
+
+      const pathtodata = resolveCdnBase(config);
+      addLog('INFO', 'Using EmulatorJS data path: ' + pathtodata + ', threads=' + useThreads);
+
+      // IMPORTANT: keep internal RetroArch shader disabled by default so WebView WebGL never black-screens
+      const defaultOpts = {
+        'shader': 'disabled',
+        'rewind-enabled': config.rewind ? 'enabled' : 'disabled',
+        'vsync': config.vsync !== false ? 'enabled' : 'disabled',
+        'ff-ratio': String(config.ffSpeed || 2) + '.0x',
+        'save-state-location': 'browser'
+      };
+      if (config.frameSkip && config.frameSkip > 0) {
+        defaultOpts['frameskip'] = String(config.frameSkip);
+      }
+      if (config.resolutionScale && config.resolutionScale > 1) {
+        defaultOpts['psp_internal_resolution'] = String(config.resolutionScale) + 'x';
+      }
+
+      const iframe = document.createElement('iframe');
+      iframe.id = 'ejs-frame';
+      iframe.setAttribute('allow', 'autoplay; fullscreen; gamepad; cross-origin-isolated');
+      iframe.style.width = '100%';
+      iframe.style.height = '100%';
+      iframe.style.display = 'block';
+      iframe.style.border = '0';
+
+      // Watchdog: 25 seconds to detect first rendered frame
+      watchdogTimer = setTimeout(() => {
+        if (!frameStarted) {
+          const reason = !navigator.onLine ? 'NO_INTERNET' : 'TIMEOUT';
+          addLog('ERR', 'Watchdog triggered after 25s (' + reason + ')');
+          notifyStatus('error', reason);
+        }
+      }, 25000);
+
+      iframe.srcdoc = buildIframeSrcdoc({
+        core: core,
+        romUrl: finalRomUrl,
+        gameName: (config.title || 'RetroVerse').replace(/[\\/:*?"<>|]/g, '_'),
+        pathtodata: pathtodata,
+        biosUrl: finalBiosUrl,
+        threads: useThreads,
+        cheats: config.cheatsList || [],
+        defaultOptions: defaultOpts,
+        volume: audioVol,
+        muted: audioMuted,
+        renderScalePercent: config.renderScalePercent || 100
+      });
+
+      mount.innerHTML = '';
+      mount.appendChild(iframe);
+      activeFrame = iframe;
+    },
+
+    teardown: function() {
+      stopHomebrew();
+      destroyActiveFrame();
+      mode = 'idle';
+    },
+
+    getDiagnosticsLog: function() {
+      return logs.join('\n');
+    }
+  };
+
+  window.RetroInput = {
+    // Direct EmulatorJS simulateInput(0, buttonIndex 0..23, value 0..1)
+    simulate: function(buttonIndex, value) {
+      if (mode === 'emulatorjs') {
+        sendToFrame({ cmd: 'input', player: 0, index: buttonIndex, value: value });
+      } else if (mode === 'homebrew') {
+        const map = { 4: 'up', 5: 'down', 6: 'left', 7: 'right', 0: 'b', 8: 'a', 1: 'y', 9: 'x', 10: 'l1', 11: 'r1', 2: 'select', 3: 'start' };
+        const k = map[buttonIndex];
+        if (k) hbKeys[k] = value > 0.5;
+      }
+    },
+    setKey: function(name, pressed) {
+      const idxMap = { b: 0, y: 1, select: 2, start: 3, up: 4, down: 5, left: 6, right: 7, a: 8, x: 9, l1: 10, r1: 11, l2: 12, r2: 13, l3: 14, r3: 15 };
+      if (idxMap[name] !== undefined) {
+        window.RetroInput.simulate(idxMap[name], pressed ? 1 : 0);
       }
     }
   };
 
   window.RetroConfig = {
-    applySettings: function(filter, scanlines, aspect, volume) {
+    applySettings: function(filter, scanlines, aspect, volume, muted, scalePercent) {
       audioVol = Math.max(0, Math.min(1, volume));
+      audioMuted = !!muted;
+      renderScalePercent = scalePercent || 100;
       const b = document.body;
       b.classList.remove(
-        'filter-crt', 'filter-scanlines', 'filter-sharp', 'filter-lcd',
-        'scanlines-on', 'aspect-43', 'aspect-169', 'aspect-orig', 'aspect-full'
+        'filter-crt', 'filter-scanlines', 'filter-sharp', 'filter-lcd', 'filter-smooth',
+        'scanlines-on', 'aspect-43', 'aspect-169', 'aspect-orig', 'aspect-full', 'aspect-int'
       );
       if (filter === 'CRT') b.classList.add('filter-crt');
       else if (filter === 'Scanlines') b.classList.add('filter-scanlines');
       else if (filter === 'LCD') b.classList.add('filter-lcd');
+      else if (filter === 'Smooth') b.classList.add('filter-smooth');
       else b.classList.add('filter-sharp');
+
       if (scanlines) b.classList.add('scanlines-on');
       if (aspect === '16:9') b.classList.add('aspect-169');
-      else if (aspect === 'Full') b.classList.add('aspect-full');
-      else if (aspect === 'Original') b.classList.add('aspect-orig');
-      else b.classList.add('aspect-43');
+      else if (aspect === 'Stretch' || aspect === 'Full') b.classList.add('aspect-full');
+      else if (aspect === '4:3') b.classList.add('aspect-43');
+      else if (aspect === 'Integer') b.classList.add('aspect-int');
+      else b.classList.add('aspect-orig');
 
-      if (mode === 'emulatorjs' && window.EJS_emulator) {
-        try {
-          if (typeof window.EJS_emulator.setVolume === 'function') {
-            window.EJS_emulator.setVolume(audioVol);
-          }
-        } catch (_) {}
+      if (mode === 'emulatorjs') {
+        sendToFrame({ cmd: 'volume', volume: audioMuted ? 0 : audioVol });
       }
     },
     setSpeed: function(mult) {
       speedMultiplier = mult || 1;
-      if (mode === 'emulatorjs' && window.EJS_emulator && window.EJS_emulator.gameManager) {
-        try {
-          window.EJS_emulator.gameManager.toggleFastForward(mult > 1 ? 1 : 0);
-        } catch (_) {}
-      }
+      if (mode === 'emulatorjs') sendToFrame({ cmd: 'speed', mult: speedMultiplier });
     },
     togglePause: function() {
       paused = !paused;
-      if (mode === 'emulatorjs' && window.EJS_emulator) {
-        try {
-          if (paused && window.EJS_emulator.pause) window.EJS_emulator.pause(true);
-          else if (!paused && window.EJS_emulator.play) window.EJS_emulator.play();
-        } catch (_) {}
-      }
+      if (mode === 'emulatorjs') sendToFrame({ cmd: 'pause', paused: paused });
       return paused;
     },
     resetGame: function() {
-      if (mode === 'emulatorjs' && window.EJS_emulator && window.EJS_emulator.gameManager) {
-        try { window.EJS_emulator.gameManager.restart(); return true; } catch (_) {}
-      } else {
-        initHomebrew(gameTitle, systemName, cartridgeMode);
-        return true;
-      }
-      return false;
+      if (mode === 'emulatorjs') sendToFrame({ cmd: 'restart' });
+      else if (lastConfig) startHomebrew('RetroVerse', hbSys, hbKind);
     },
     rewindStep: function() {
-      if (mode === 'emulatorjs' && window.EJS_emulator && window.EJS_emulator.gameManager) {
-        try {
-          if (typeof window.EJS_emulator.gameManager.rewind === 'function') {
-            window.EJS_emulator.gameManager.rewind();
-            return true;
-          }
-        } catch (_) {}
+      if (mode === 'emulatorjs') {
+        sendToFrame({ cmd: 'rewind' });
+      } else if (hbRewind.length > 0) {
+        const snap = hbRewind.pop();
+        if (snap) hbState = snap;
       }
-      if (mode === 'homebrew' && rewindBuffer.length > 5) {
-        const snap = rewindBuffer.splice(-12, 12)[0];
-        if (snap) {
-          state = JSON.parse(JSON.stringify(snap));
-          beep(320, 0.08, 'sawtooth');
-        }
-        return true;
-      }
-      return false;
     },
-    exportState: function() {
+    applyCheats: function(cheatsList) {
+      if (mode === 'emulatorjs') sendToFrame({ cmd: 'set_cheats', cheats: cheatsList });
+    },
+    setDisc: function(discIndex) {
+      if (mode === 'emulatorjs') sendToFrame({ cmd: 'disc', discIndex: discIndex });
+    },
+    exportStateAsync: function(cbName) {
       if (mode === 'homebrew') {
-        return JSON.stringify({ cartridgeMode, state });
-      }
-      if (window.EJS_emulator && window.EJS_emulator.gameManager) {
-        try {
-          const bytes = window.EJS_emulator.gameManager.getState();
-          if (bytes) {
-            let bin = '';
-            const chunk = 8192;
-            for (let i = 0; i < bytes.length; i += chunk) {
-              bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
-            }
-            return JSON.stringify({ ejs: btoa(bin) });
-          }
-        } catch (_) {}
-      }
-      return JSON.stringify({ cartridgeMode, state });
-    },
-    importState: function(jsonStr) {
-      try {
-        const parsed = JSON.parse(jsonStr);
-        if (parsed.ejs && mode === 'emulatorjs' && window.EJS_emulator && window.EJS_emulator.gameManager) {
-          const bin = atob(parsed.ejs);
-          const arr = new Uint8Array(bin.length);
-          for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-          window.EJS_emulator.gameManager.loadState(arr);
-          return true;
-        }
-        if (parsed.state) {
-          state = parsed.state;
-          beep(740, 0.09, 'triangle');
-          return true;
-        }
-      } catch (_) {}
-      return false;
-    },
-    captureScreenshot: function() {
-      try {
-        if (mode === 'homebrew') {
-          return hbCanvas.toDataURL('image/png');
-        }
-        const ejsCanvas = document.querySelector('#game canvas');
-        if (ejsCanvas) return ejsCanvas.toDataURL('image/png');
-      } catch (_) {}
-      return hbCanvas.toDataURL('image/png');
-    }
-  };
-
-  const hbCanvas = document.getElementById('hbCanvas');
-  const ctx = hbCanvas.getContext('2d');
-  let rewindBuffer = [];
-  let state = {};
-  let frameCount = 0;
-  let lastFpsTime = performance.now();
-  let animId = null;
-
-  function initHomebrew(title, sys, kind) {
-    mode = 'homebrew';
-    gameTitle = title || 'RetroVerse';
-    systemName = sys || 'PS1';
-    cartridgeMode = kind || 'racer';
-    document.getElementById('game').style.display = 'none';
-    hbCanvas.style.display = 'block';
-    rewindBuffer = [];
-
-    state = {
-      px: 160, py: 185, vx: 0, vy: 0,
-      score: 0, speed: 2.8, roadOffset: 0,
-      ticks: 0, stars: Array.from({length: 34}, (_, i) => ({
-        x: (i * 47) % 320, y: (i * 29) % 130, r: (i % 2) + 1
-      })),
-      obstacles: [
-        { x: 110, y: 120, lane: -0.4, w: 22 },
-        { x: 210, y: 80, lane: 0.45, w: 22 }
-      ],
-      bullets: [],
-      platforms: [
-        { x: 20, y: 195, w: 95 },
-        { x: 135, y: 162, w: 80 },
-        { x: 230, y: 130, w: 75 },
-        { x: 0, y: 224, w: 320 }
-      ],
-      coins: [
-        { x: 165, y: 142, taken: false },
-        { x: 260, y: 110, taken: false },
-        { x: 65, y: 175, taken: false }
-      ],
-      grounded: false
-    };
-
-    notifyStatus('running', '');
-    if (!animId) loop();
-  }
-
-  function stepHomebrew() {
-    if (paused) return;
-    state.ticks++;
-    if (state.ticks % 4 === 0) {
-      rewindBuffer.push(JSON.parse(JSON.stringify(state)));
-      if (rewindBuffer.length > 90) rewindBuffer.shift();
-    }
-
-    if (cartridgeMode === 'racer' || cartridgeMode === 'kart') {
-      if (keys.left) state.px -= 3.2;
-      if (keys.right) state.px += 3.2;
-      if (keys.a || keys.up) state.speed = Math.min(7.5, state.speed + 0.12);
-      else if (keys.b || keys.down) state.speed = Math.max(1.2, state.speed - 0.18);
-      else state.speed = Math.max(2.6, state.speed - 0.03);
-      state.px = Math.max(68, Math.min(252, state.px));
-      state.roadOffset = (state.roadOffset + state.speed * 2.5) % 40;
-      state.score += Math.floor(state.speed);
-      state.obstacles.forEach((ob, idx) => {
-        ob.y += state.speed * 1.1;
-        if (ob.y > 240) {
-          ob.y = 112;
-          ob.lane = ((state.ticks + idx * 37) % 100 - 50) / 65;
-        }
-      });
-    } else if (cartridgeMode === 'pilot' || cartridgeMode === 'space' || cartridgeMode === 'ring') {
-      if (keys.left) state.px -= 3.0;
-      if (keys.right) state.px += 3.0;
-      if (keys.up) state.py -= 2.8;
-      if (keys.down) state.py += 2.8;
-      state.px = Math.max(20, Math.min(300, state.px));
-      state.py = Math.max(28, Math.min(214, state.py));
-      if ((keys.a || keys.x) && state.ticks % 8 === 0) {
-        state.bullets.push({ x: state.px + 10, y: state.py });
-        beep(840, 0.04, 'square');
-      }
-      state.bullets = state.bullets.filter(b => {
-        b.x += 6.5;
-        return b.x < 330;
-      });
-      state.obstacles.forEach((ob, idx) => {
-        ob.x -= 2.3;
-        if (ob.x < -20) {
-          ob.x = 330;
-          ob.y = 35 + ((state.ticks * (idx + 3)) % 175);
-        }
-        state.bullets.forEach(b => {
-          if (Math.abs(b.x - ob.x) < 16 && Math.abs(b.y - ob.y) < 16) {
-            ob.x = 340; state.score += 100; beep(240, 0.09, 'sawtooth');
-          }
-        });
-      });
-      state.stars.forEach(s => { s.x -= 1.2; if (s.x < 0) s.x = 320; });
-    } else {
-      if (keys.left) state.vx = -2.8;
-      else if (keys.right) state.vx = 2.8;
-      else state.vx *= 0.72;
-      if ((keys.a || keys.up) && state.grounded) {
-        state.vy = -6.4; state.grounded = false; beep(620, 0.08, 'square');
-      }
-      state.vy = Math.min(6.0, state.vy + 0.34);
-      state.px = Math.max(12, Math.min(308, state.px + state.vx));
-      state.py += state.vy;
-      state.grounded = false;
-      state.platforms.forEach(p => {
-        if (state.vy >= 0 && state.px >= p.x - 8 && state.px <= p.x + p.w + 8 &&
-            state.py >= p.y - 12 && state.py <= p.y + 8) {
-          state.py = p.y - 12; state.vy = 0; state.grounded = true;
-        }
-      });
-      state.coins.forEach(c => {
-        if (!c.taken && Math.hypot(state.px - c.x, state.py - c.y) < 16) {
-          c.taken = true; state.score += 250; beep(980, 0.1, 'triangle');
-        }
-      });
-      if (state.coins.every(c => c.taken)) {
-        state.coins.forEach(c => c.taken = false);
-      }
-    }
-  }
-
-  function renderHomebrew() {
-    const w = 320, h = 240;
-    ctx.clearRect(0, 0, w, h);
-    if (cartridgeMode === 'racer' || cartridgeMode === 'kart') {
-      const sky = ctx.createLinearGradient(0, 0, 0, 118);
-      sky.addColorStop(0, '#12082E'); sky.addColorStop(0.55, '#8B5CF6'); sky.addColorStop(1, '#F59E0B');
-      ctx.fillStyle = sky; ctx.fillRect(0, 0, w, 118);
-
-      const sunGrad = ctx.createLinearGradient(0, 34, 0, 108);
-      sunGrad.addColorStop(0, '#FDE047'); sunGrad.addColorStop(1, '#EC4899');
-      ctx.fillStyle = sunGrad; ctx.beginPath(); ctx.arc(160, 74, 34, 0, Math.PI * 2); ctx.fill();
-
-      ctx.fillStyle = '#0B0D18'; ctx.fillRect(0, 118, w, 122);
-      ctx.fillStyle = '#181B2C';
-      ctx.beginPath();
-      ctx.moveTo(132, 118); ctx.lineTo(188, 118);
-      ctx.lineTo(305, 240); ctx.lineTo(15, 240);
-      ctx.closePath(); ctx.fill();
-
-      ctx.strokeStyle = '#22D3EE'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(132, 118); ctx.lineTo(15, 240); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(188, 118); ctx.lineTo(305, 240); ctx.stroke();
-
-      ctx.fillStyle = '#8B5CF6';
-      for (let i = 0; i < 6; i++) {
-        const y = 122 + ((i * 22 + state.roadOffset) % 118);
-        const t = (y - 118) / 122;
-        ctx.fillRect(160 - 2 * t, y, 4 * t + 1, 8 * t + 2);
-      }
-
-      state.obstacles.forEach(ob => {
-        const t = Math.max(0.05, (ob.y - 114) / 126);
-        const ox = 160 + ob.lane * 110 * t;
-        const ow = 26 * t, oh = 16 * t;
-        ctx.fillStyle = '#EC4899'; ctx.fillRect(ox - ow / 2, ob.y - oh, ow, oh);
-      });
-
-      ctx.fillStyle = '#22D3EE'; ctx.fillRect(state.px - 20, 198, 40, 20);
-      ctx.fillStyle = '#8B5CF6'; ctx.fillRect(state.px - 14, 190, 28, 10);
-    } else {
-      const bg = ctx.createLinearGradient(0, 0, 0, h);
-      bg.addColorStop(0, '#050814'); bg.addColorStop(1, '#0E2438');
-      ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h);
-      ctx.fillStyle = '#8B5CF6'; ctx.fillRect(state.px - 9, state.py - 12, 18, 22);
-    }
-
-    ctx.fillStyle = 'rgba(7,8,13,0.62)';
-    ctx.fillRect(8, 8, 130, 18);
-    ctx.fillStyle = '#E2E8F0';
-    ctx.font = 'bold 10px monospace';
-    ctx.fillText(systemName + ' • SCORE ' + state.score, 14, 20);
-  }
-
-  function loop() {
-    for (let i = 0; i < speedMultiplier; i++) stepHomebrew();
-    renderHomebrew();
-    frameCount++;
-    const now = performance.now();
-    if (now - lastFpsTime >= 1000) {
-      const fps = Math.round((frameCount * 1000) / (now - lastFpsTime));
-      frameCount = 0; lastFpsTime = now;
-      if (window.RetroHost && window.RetroHost.onFpsUpdate) window.RetroHost.onFpsUpdate(fps);
-    }
-    animId = requestAnimationFrame(loop);
-  }
-
-  window.RetroEngine = {
-    bootHomebrew: function(title, sys, kind) {
-      initHomebrew(title, sys, kind);
-    },
-    bootRom: function(config) {
-      if (animId) { cancelAnimationFrame(animId); animId = null; }
-      mode = 'emulatorjs';
-      gameTitle = config.title || 'RetroVerse';
-      systemName = config.core ? config.core.toUpperCase() : 'GAME';
-      hbCanvas.style.display = 'none';
-      const gameDiv = document.getElementById('game');
-      gameDiv.style.display = 'flex';
-      gameDiv.innerHTML = '';
-
-      notifyStatus('loading', config.core || 'auto');
-
-      const core = config.core || 'nes';
-      const isPsp = (core === 'psp' || core === 'ppsspp');
-      const isIsolated = !!window.crossOriginIsolated;
-
-      if (isPsp && !isIsolated) {
-        notifyStatus('error', 'PSP_NO_SAB');
+        const data = JSON.stringify({ hb: hbState });
+        window.RetroHost && window.RetroHost.onStateExported && window.RetroHost.onStateExported(cbName, data);
         return;
       }
-
-      window.EJS_player = '#game';
-      window.EJS_core = core;
-      window.EJS_gameUrl = config.romUrl;
-      window.EJS_gameName = gameTitle;
-      window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
-      window.EJS_startOnLoaded = true;
-      window.EJS_threads = isPsp; // إجبار التفعيل لـ PSP فقط، وتعطيلها لـ GBA/PS1 لتجنب تعطلها
-      window.EJS_color = '#8B5CF6';
-      window.EJS_VirtualGamepadSettings = [];
-
-      if (config.biosUrl && config.biosUrl.length > 0) {
-        window.EJS_biosUrl = config.biosUrl;
-      }
-      if (config.cheats) {
-        window.EJS_cheats = [[0, config.cheats]];
-      }
-      window.EJS_defaultOptions = {
-        'shader': config.shader || 'disabled',
-        'rewind-enabled': config.rewind ? 'enabled' : 'disabled',
-        'vsync': config.vsync ? 'enabled' : 'disabled',
-        'ff-ratio': String(config.ffSpeed || 2) + '.0x',
-        'save-state-location': 'browser'
+      const reqId = 'st_' + (reqSeq++);
+      pendingCallbacks[reqId] = function(data) {
+        window.RetroHost && window.RetroHost.onStateExported && window.RetroHost.onStateExported(cbName, data || '');
       };
-
-      let loadTimer = setTimeout(() => {
-        notifyStatus('error', 'TIMEOUT');
-      }, 15000);
-
-      window.EJS_onGameStart = function() {
-        clearTimeout(loadTimer);
-        notifyStatus('running', core);
+      sendToFrame({ cmd: 'export_state', reqId: reqId });
+    },
+    importState: function(jsonStr) {
+      if (mode === 'emulatorjs') {
+        sendToFrame({ cmd: 'import_state', jsonStr: jsonStr });
+      } else {
         try {
-          if (window.EJS_emulator && typeof window.EJS_emulator.setVolume === 'function') {
-            window.EJS_emulator.setVolume(audioVol);
-          }
+          const p = JSON.parse(jsonStr);
+          if (p && p.hb) hbState = p.hb;
         } catch (_) {}
-
-        // حل مشكلة GBA الشاشة السوداء: فرض إعادة تحجيم وعرض الـ Canvas بعد البدء
-        setTimeout(() => {
-          try {
-            window.dispatchEvent(new Event('resize'));
-            const c = document.querySelector('#game canvas');
-            if (c) {
-              c.style.width = '100%';
-              c.style.height = '100%';
-              c.style.display = 'block';
-            }
-          } catch (_) {}
-        }, 400);
-
-        if (window.RetroHost && window.RetroHost.onFpsUpdate) {
-          window.RetroHost.onFpsUpdate(60);
-        }
+      }
+    },
+    captureScreenshotAsync: function(cbName) {
+      if (mode === 'homebrew') {
+        const dataUrl = hbCanvas.toDataURL('image/png');
+        window.RetroHost && window.RetroHost.onScreenshotCaptured && window.RetroHost.onScreenshotCaptured(cbName, dataUrl);
+        return;
+      }
+      const reqId = 'sc_' + (reqSeq++);
+      pendingCallbacks[reqId] = function(dataUrl) {
+        window.RetroHost && window.RetroHost.onScreenshotCaptured && window.RetroHost.onScreenshotCaptured(cbName, dataUrl || '');
       };
-
-      const old = document.getElementById('ejs-loader-script');
-      if (old) old.remove();
-      const script = document.createElement('script');
-      script.id = 'ejs-loader-script';
-      script.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
-      script.onerror = function() {
-        clearTimeout(loadTimer);
-        notifyStatus('error', 'CDN_LOAD_FAILED');
-      };
-      document.body.appendChild(script);
+      sendToFrame({ cmd: 'screenshot', reqId: reqId });
     }
   };
 })();

@@ -21,5 +21,7 @@ data class GameEntity(
     val isFavorite: Boolean,
     val lastPlayedAt: Long,
     val createdAt: Long,
-    val coverUrl: String? = null
+    val coverUrl: String? = null,
+    val gameSerial: String? = null,
+    val aiNotes: String? = null
 )

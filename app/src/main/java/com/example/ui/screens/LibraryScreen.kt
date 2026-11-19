@@ -29,22 +29,23 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SportsEsports
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -74,6 +75,8 @@ import com.example.ui.theme.SurfaceDark
 import com.example.ui.theme.SurfaceElevated
 import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.WarningAmber
+import com.example.viewmodel.BulkCoverProgress
+import com.example.viewmodel.LibrarySortOrder
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -83,20 +86,34 @@ fun LibraryScreen(
     games: List<GameEntity>,
     searchQuery: String,
     selectedSystemId: String?,
+    sortOrder: LibrarySortOrder,
+    bulkCoverProgress: BulkCoverProgress?,
+    aiBusy: Boolean,
     onSearchChange: (String) -> Unit,
     onSelectSystemFilter: (String?) -> Unit,
     onSelectSystemSoon: (RetroSystem) -> Unit,
+    onChangeSortOrder: (LibrarySortOrder) -> Unit,
     onImportClick: () -> Unit,
+    onFetchAllCovers: () -> Unit,
     onPlayGame: (GameEntity) -> Unit,
     onToggleFavorite: (GameEntity) -> Unit,
     onUpdateCoverUrl: (GameEntity, String?) -> Unit,
+    onPickCoverFromPhone: (GameEntity) -> Unit,
+    onAutoFetchCover: (GameEntity) -> Unit,
+    onRenameGame: (Long, String) -> Unit,
+    onChangeSystemAndCore: (Long, RetroSystem, String) -> Unit,
+    onManageCheats: (GameEntity) -> Unit,
+    onFetchAiGameInfo: (GameEntity) -> Unit,
     onDeleteGame: (GameEntity) -> Unit
 ) {
     val strings = LocalAppStrings.current
     val isArabic = LocalIsArabic.current
-    var gameToManage by remember { mutableStateOf<GameEntity?>(null) }
-    var gameForCoverDialog by remember { mutableStateOf<GameEntity?>(null) }
-    var draftCoverUrl by remember { mutableStateOf("") }
+    var gameToManageId by remember { mutableStateOf<Long?>(null) }
+    var gameForCoverDialogId by remember { mutableStateOf<Long?>(null) }
+    var showSortMenu by remember { mutableStateOf(false) }
+
+    val gameToManage = games.firstOrNull { it.id == gameToManageId }
+    val gameForCoverDialog = games.firstOrNull { it.id == gameForCoverDialogId }
 
     Column(
         modifier = Modifier
@@ -104,12 +121,12 @@ fun LibraryScreen(
             .statusBarsPadding(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Header: Title + Circular '+' Import button
+        // Header: Title + Fetch All Covers + Sort + Circular '+' Import
         Row(
             modifier = Modifier
-                .widthIn(max = 600.dp)
+                .widthIn(max = 680.dp)
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 14.dp),
+                .padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -119,20 +136,130 @@ fun LibraryScreen(
                 color = MaterialTheme.colorScheme.onBackground
             )
 
-            IconButton(
-                onClick = onImportClick,
-                modifier = Modifier
-                    .size(48.dp)
-                    .testTag("library_import_button")
-                    .clip(CircleShape)
-                    .background(SurfaceElevated)
-                    .border(1.dp, BorderSubtle, CircleShape)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.Add,
-                    contentDescription = strings.importRom,
-                    tint = Color.White,
-                    modifier = Modifier.size(22.dp)
+                if (!isFavoritesMode && games.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(SurfaceElevated)
+                            .border(1.dp, BorderSubtle, RoundedCornerShape(20.dp))
+                            .clickable(enabled = bulkCoverProgress == null, onClick = onFetchAllCovers)
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = SecondaryCyan, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            text = strings.fetchAllCovers,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color.White,
+                            maxLines = 1
+                        )
+                    }
+                }
+
+                Box {
+                    IconButton(
+                        onClick = { showSortMenu = true },
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(SurfaceElevated)
+                            .border(1.dp, BorderSubtle, CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.Sort,
+                            contentDescription = "Sort",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showSortMenu,
+                        onDismissRequest = { showSortMenu = false },
+                        containerColor = SurfaceDark
+                    ) {
+                        LibrarySortOrder.entries.forEach { order ->
+                            val label = when (order) {
+                                LibrarySortOrder.LAST_PLAYED -> if (isArabic) "آخر لعب" else "Last Played"
+                                LibrarySortOrder.NAME_ASC -> if (isArabic) "الاسم (أ-ي)" else "Name (A-Z)"
+                                LibrarySortOrder.PLAY_TIME_DESC -> if (isArabic) "الأكثر لعباً" else "Most Played"
+                                LibrarySortOrder.SYSTEM -> if (isArabic) "حسب النظام" else "By System"
+                            }
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        label,
+                                        color = if (order == sortOrder) SecondaryCyan else Color.White
+                                    )
+                                },
+                                onClick = {
+                                    onChangeSortOrder(order)
+                                    showSortMenu = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                IconButton(
+                    onClick = onImportClick,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .testTag("library_import_button")
+                        .clip(CircleShape)
+                        .background(Brush.horizontalGradient(listOf(PrimaryPurple, SecondaryCyan)))
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Add,
+                        contentDescription = strings.importRom,
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+        }
+
+        // Bulk Cover Fetch Progress Banner
+        if (bulkCoverProgress != null) {
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 680.dp)
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(SurfaceElevated)
+                    .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = if (isArabic) "جلب الأغلفة: ${bulkCoverProgress.currentTitle}" else "Fetching cover: ${bulkCoverProgress.currentTitle}",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "${bulkCoverProgress.current} / ${bulkCoverProgress.total}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = SecondaryCyan
+                    )
+                }
+                LinearProgressIndicator(
+                    progress = { bulkCoverProgress.current.toFloat() / bulkCoverProgress.total.coerceAtLeast(1) },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = SecondaryCyan,
+                    trackColor = SurfaceDark
                 )
             }
         }
@@ -140,7 +267,7 @@ fun LibraryScreen(
         // Capsule Search Bar
         Row(
             modifier = Modifier
-                .widthIn(max = 600.dp)
+                .widthIn(max = 680.dp)
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
                 .height(48.dp)
@@ -150,12 +277,7 @@ fun LibraryScreen(
                 .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = Icons.Rounded.Search,
-                contentDescription = null,
-                tint = TextSecondary,
-                modifier = Modifier.size(20.dp)
-            )
+            Icon(Icons.Rounded.Search, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(10.dp))
             Box(modifier = Modifier.weight(1f)) {
                 if (searchQuery.isEmpty()) {
@@ -177,35 +299,26 @@ fun LibraryScreen(
                 )
             }
             if (searchQuery.isNotEmpty()) {
-                IconButton(
-                    onClick = { onSearchChange("") },
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Close,
-                        contentDescription = strings.close,
-                        tint = TextSecondary,
-                        modifier = Modifier.size(18.dp)
-                    )
+                IconButton(onClick = { onSearchChange("") }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Rounded.Close, contentDescription = strings.close, tint = TextSecondary, modifier = Modifier.size(18.dp))
                 }
             }
         }
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
 
-        // Horizontal Filter Pills
+        // Horizontal System Filter Pills
         LazyRow(
             modifier = Modifier
-                .widthIn(max = 600.dp)
+                .widthIn(max = 680.dp)
                 .fillMaxWidth(),
             contentPadding = PaddingValues(horizontal = 20.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             item {
-                val active = selectedSystemId == null
                 FilterChipPill(
                     label = strings.all,
-                    active = active,
+                    active = selectedSystemId == null,
                     isSoon = false,
                     onClick = { onSelectSystemFilter(null) }
                 )
@@ -227,7 +340,7 @@ fun LibraryScreen(
             }
         }
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
 
         if (games.isEmpty()) {
             Box(
@@ -290,7 +403,7 @@ fun LibraryScreen(
                 columns = GridCells.Adaptive(minSize = 156.dp),
                 modifier = Modifier
                     .weight(1f)
-                    .widthIn(max = 720.dp)
+                    .widthIn(max = 800.dp)
                     .fillMaxWidth(),
                 contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 108.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -308,7 +421,7 @@ fun LibraryScreen(
                             .clip(RoundedCornerShape(22.dp))
                             .combinedClickable(
                                 onClick = { onPlayGame(game) },
-                                onLongClick = { gameToManage = game }
+                                onLongClick = { gameToManageId = game.id }
                             )
                     ) {
                         Box(
@@ -325,13 +438,12 @@ fun LibraryScreen(
                                 modifier = Modifier.fillMaxSize()
                             )
 
-                            // System pill badge
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
                                     .padding(10.dp)
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(Color.Black.copy(alpha = 0.58f))
+                                    .background(Color.Black.copy(alpha = 0.62f))
                                     .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(10.dp))
                                     .padding(horizontal = 8.dp, vertical = 3.dp)
                             ) {
@@ -342,7 +454,6 @@ fun LibraryScreen(
                                 )
                             }
 
-                            // Favorite heart toggle (48dp touch area)
                             IconButton(
                                 onClick = { onToggleFavorite(game) },
                                 modifier = Modifier
@@ -355,7 +466,7 @@ fun LibraryScreen(
                                     modifier = Modifier
                                         .size(32.dp)
                                         .clip(CircleShape)
-                                        .background(Color.Black.copy(alpha = 0.45f)),
+                                        .background(Color.Black.copy(alpha = 0.48f)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
@@ -367,12 +478,31 @@ fun LibraryScreen(
                                 }
                             }
 
-                            // Set Cover Art URL button (48dp touch area)
                             IconButton(
-                                onClick = {
-                                    draftCoverUrl = game.coverUrl.orEmpty()
-                                    gameForCoverDialog = game
-                                },
+                                onClick = { gameToManageId = game.id },
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .padding(2.dp)
+                                    .size(48.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.Black.copy(alpha = 0.52f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.MoreVert,
+                                        contentDescription = strings.renameGame,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(17.dp)
+                                    )
+                                }
+                            }
+
+                            IconButton(
+                                onClick = { gameForCoverDialogId = game.id },
                                 modifier = Modifier
                                     .align(Alignment.BottomEnd)
                                     .padding(2.dp)
@@ -418,124 +548,27 @@ fun LibraryScreen(
     }
 
     gameToManage?.let { selected ->
-        AlertDialog(
-            onDismissRequest = { gameToManage = null },
-            containerColor = SurfaceDark,
-            title = { Text(selected.title, color = Color.White) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "${RetroSystem.fromId(selected.systemId).shortName} • ${selected.fileName}",
-                        color = TextSecondary
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(SurfaceElevated)
-                            .clickable {
-                                draftCoverUrl = selected.coverUrl.orEmpty()
-                                gameForCoverDialog = selected
-                                gameToManage = null
-                            }
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Rounded.Image, contentDescription = null, tint = SecondaryCyan)
-                        Spacer(Modifier.width(10.dp))
-                        Text(strings.setCoverUrlButton, color = Color.White)
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    onDeleteGame(selected)
-                    gameToManage = null
-                }) {
-                    Icon(Icons.Rounded.DeleteOutline, contentDescription = null, tint = ErrorRose)
-                    Spacer(Modifier.width(4.dp))
-                    Text(strings.deleteGame, color = ErrorRose)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { gameToManage = null }) {
-                    Text(strings.close, color = TextSecondary)
-                }
-            }
+        GameManageDialog(
+            game = selected,
+            aiBusy = aiBusy,
+            onDismiss = { gameToManageId = null },
+            onPlay = { onPlayGame(selected) },
+            onRename = { newTitle -> onRenameGame(selected.id, newTitle) },
+            onChangeSystemAndCore = { sys, core -> onChangeSystemAndCore(selected.id, sys, core) },
+            onOpenCoverDialog = { gameForCoverDialogId = selected.id },
+            onManageCheats = { onManageCheats(selected) },
+            onFetchAiInfo = { onFetchAiGameInfo(selected) },
+            onDelete = { onDeleteGame(selected) }
         )
     }
 
-    gameForCoverDialog?.let { targetGame ->
-        AlertDialog(
-            onDismissRequest = { gameForCoverDialog = null },
-            containerColor = SurfaceDark,
-            title = { Text(strings.setCoverUrlTitle, color = Color.White) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(targetGame.title, style = MaterialTheme.typography.labelLarge, color = SecondaryCyan)
-                    OutlinedTextField(
-                        value = draftCoverUrl,
-                        onValueChange = { draftCoverUrl = it },
-                        placeholder = { Text(strings.setCoverUrlHint, color = TextSecondary) },
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("cover_url_input")
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(SurfaceElevated)
-                            .clickable {
-                                val sysFolder = when (RetroSystem.fromId(targetGame.systemId)) {
-                                    RetroSystem.PS1 -> "Sony_-_PlayStation"
-                                    RetroSystem.PSP -> "Sony_-_PlayStation_Portable"
-                                    RetroSystem.N64 -> "Nintendo_-_Nintendo_64"
-                                    RetroSystem.SNES -> "Nintendo_-_Super_Nintendo_Entertainment_System"
-                                    RetroSystem.NES -> "Nintendo_-_Nintendo_Entertainment_System"
-                                    RetroSystem.GBA -> "Nintendo_-_Game_Boy_Advance"
-                                    RetroSystem.GBC -> "Nintendo_-_Game_Boy_Color"
-                                    RetroSystem.GB -> "Nintendo_-_Game_Boy"
-                                    RetroSystem.NDS -> "Nintendo_-_Nintendo_DS"
-                                    RetroSystem.SEGA -> "Sega_-_Mega_Drive_-_Genesis"
-                                    else -> "Nintendo_-_Nintendo_Entertainment_System"
-                                }
-                                val encoded = java.net.URLEncoder.encode(targetGame.title, "UTF-8").replace("+", "%20")
-                                draftCoverUrl = "https://thumbnails.libretro.com/$sysFolder/Named_Boxarts/$encoded.png"
-                            }
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = PrimaryPurple, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(strings.autoFillLibretroCover, style = MaterialTheme.typography.labelLarge, color = Color.White)
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    onUpdateCoverUrl(targetGame, draftCoverUrl)
-                    gameForCoverDialog = null
-                }) {
-                    Text(strings.saveAction, color = SecondaryCyan)
-                }
-            },
-            dismissButton = {
-                Row {
-                    if (!targetGame.coverUrl.isNullOrBlank()) {
-                        TextButton(onClick = {
-                            onUpdateCoverUrl(targetGame, null)
-                            gameForCoverDialog = null
-                        }) {
-                            Text(strings.clearCoverUrl, color = ErrorRose)
-                        }
-                    }
-                    TextButton(onClick = { gameForCoverDialog = null }) {
-                        Text(strings.cancelAction, color = TextSecondary)
-                    }
-                }
-            }
+    gameForCoverDialog?.let { target ->
+        CoverManagerDialog(
+            game = target,
+            onDismiss = { gameForCoverDialogId = null },
+            onSaveUrl = { url -> onUpdateCoverUrl(target, url) },
+            onPickFromPhone = { onPickCoverFromPhone(target) },
+            onAutoFetchOnline = { onAutoFetchCover(target) }
         )
     }
 }
