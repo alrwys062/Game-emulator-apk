@@ -52,6 +52,7 @@ import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Vibration
 import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material.icons.rounded.WbSunny
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
@@ -546,22 +547,6 @@ fun SettingsScreen(
                 )
                 SettingsDivider()
                 SettingsCycleRow(
-                    icon = Icons.Rounded.Backup,
-                    iconBg = PrimaryPurple,
-                    title = if (isArabic) "تصدير نسخة احتياطية (JSON)" else "Export Settings Backup (JSON)",
-                    valueLabel = "",
-                    onClick = onExportBackup
-                )
-                SettingsDivider()
-                SettingsCycleRow(
-                    icon = Icons.Rounded.Download,
-                    iconBg = SuccessGreen,
-                    title = if (isArabic) "استيراد نسخة احتياطية (JSON)" else "Import Settings Backup (JSON)",
-                    valueLabel = "",
-                    onClick = onImportBackup
-                )
-                SettingsDivider()
-                SettingsCycleRow(
                     icon = Icons.Rounded.BugReport,
                     iconBg = WarningAmber,
                     title = if (isArabic) "سجل التشخيص والأخطاء" else "Diagnostic & Error Logs",
@@ -583,6 +568,58 @@ fun SettingsScreen(
                     title = strings.settingClearCache,
                     valueLabel = "",
                     onClick = onClearCache
+                )
+            }
+        }
+
+        // Section 5: Backup & Restore (Settings + Covers + Cheats JSON)
+        item {
+            SettingsGroupHeader(if (isArabic) "نسخة احتياطية" else "Backup & Restore")
+            Row(
+                modifier = Modifier
+                    .widthIn(max = 600.dp)
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 6.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(WarningAmber.copy(alpha = 0.14f))
+                    .border(1.dp, WarningAmber.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Warning,
+                    contentDescription = null,
+                    tint = WarningAmber,
+                    modifier = Modifier.size(20.dp)
+                )
+                Text(
+                    text = if (isArabic) {
+                        "خذ نسخة احتياطية قبل التحديث — يتم حفظ الإعدادات والأغلفة وأكواد الغش بصيغة JSON."
+                    } else {
+                        "Back up before updating — saves settings, covers, and cheat codes as JSON."
+                    },
+                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = WarningAmber
+                )
+            }
+            SettingsGroupCard {
+                SettingsCycleRow(
+                    icon = Icons.Rounded.Backup,
+                    iconBg = PrimaryPurple,
+                    title = if (isArabic) "تصدير نسخة احتياطية (الإعدادات + الأغلفة + الغش JSON)" else "Export Backup (Settings + Covers + Cheats JSON)",
+                    valueLabel = "JSON",
+                    testTag = "settings_export_backup",
+                    onClick = onExportBackup
+                )
+                SettingsDivider()
+                SettingsCycleRow(
+                    icon = Icons.Rounded.Download,
+                    iconBg = SuccessGreen,
+                    title = if (isArabic) "استيراد نسخة احتياطية (JSON)" else "Import Backup (JSON)",
+                    valueLabel = "",
+                    testTag = "settings_import_backup",
+                    onClick = onImportBackup
                 )
             }
         }

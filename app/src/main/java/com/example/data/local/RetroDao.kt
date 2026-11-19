@@ -79,6 +79,12 @@ interface RetroDao {
     @Query("DELETE FROM cheats WHERE id = :cheatId")
     suspend fun deleteCheatById(cheatId: Long)
 
+    @Query("SELECT * FROM games ORDER BY lastPlayedAt DESC, createdAt DESC")
+    suspend fun getAllGamesOnce(): List<GameEntity>
+
+    @Query("SELECT * FROM cheats ORDER BY id DESC")
+    suspend fun getAllCheatsOnce(): List<CheatEntity>
+
     @Query("DELETE FROM cheats WHERE gameId = :gameId")
     suspend fun deleteCheatsForGame(gameId: Long)
 }

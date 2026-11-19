@@ -11,6 +11,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.view.KeyEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
@@ -30,10 +31,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -75,6 +78,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -95,9 +99,11 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -252,6 +258,8 @@ fun PlayScreen(
     var forceNoThreads by remember { mutableStateOf(false) }
     var pendingSaveSlot by remember { mutableIntStateOf(-1) }
     var pendingStatePayload by remember { mutableStateOf<String?>(null) }
+    var loadingElapsedSec by remember { mutableIntStateOf(0) }
+    var loadingTotalSec by remember { mutableIntStateOf(25) }
     val stageStates = remember {
         mutableStateMapOf(
             1 to EngineStageInfo(),
@@ -336,9 +344,13 @@ fun PlayScreen(
 
     fun bootEngineInWebView(view: WebView?, cdnOverride: String? = activeCdnOverride, noThreads: Boolean = forceNoThreads) {
         val wv = view ?: return
+        val coreLow = resolvedCore.lowercase()
+        val heavyCore = coreLow == "psx" || coreLow == "pcsx_rearmed" || coreLow == "psp" || coreLow == "ppsspp" || coreLow == "n64"
         engineStatus = "loading"
         engineErrorDetail = ""
         diagnosticLogs = ""
+        loadingElapsedSec = 0
+        loadingTotalSec = if (!isEngineTestMode && heavyCore) 40 else 25
         for (i in 1..6) stageStates[i] = EngineStageInfo("pending", "")
 
         if (isEngineTestMode) {
@@ -527,59 +539,89 @@ fun PlayScreen(
                 } else false
             }
     ) {
-        // Shared WebView Viewport composable
+        // Shared WebView Viewport composable (strict LTR wrapper so RTL parent never collapses WebView to 0px width)
         val webViewContent: @Composable (Modifier) -> Unit = { boxMod ->
-            Box(
-                modifier = boxMod
-                    .clip(RoundedCornerShape(if (isLandscape) 14.dp else 22.dp))
-                    .background(Color(0xFF04060A))
-                    .border(1.dp, BorderGlass, RoundedCornerShape(if (isLandscape) 14.dp else 22.dp))
-            ) {
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { ctx ->
-                        WebView(ctx).apply {
-                            webViewRef = this
-                            setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                            this.settings.javaScriptEnabled = true
-                            this.settings.domStorageEnabled = true
-                            this.settings.databaseEnabled = true
-                            this.settings.allowFileAccess = true
-                            this.settings.allowContentAccess = true
-                            this.settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                            this.settings.mediaPlaybackRequiresUserGesture = false
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                Box(
+                    modifier = boxMod
+                        .clip(RoundedCornerShape(if (isLandscape) 14.dp else 22.dp))
+                        .background(Color(0xFF04060A))
+                        .border(1.dp, BorderGlass, RoundedCornerShape(if (isLandscape) 14.dp else 22.dp))
+                ) {
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { ctx ->
+                            WebView(ctx).apply {
+                                webViewRef = this
+                                layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
+                                layoutDirection = View.LAYOUT_DIRECTION_LTR
+                                setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                                this.settings.javaScriptEnabled = true
+                                this.settings.domStorageEnabled = true
+                                this.settings.databaseEnabled = true
+                                this.settings.allowFileAccess = true
+                                this.settings.allowContentAccess = true
+                                this.settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                                this.settings.mediaPlaybackRequiresUserGesture = false
 
-                            addJavascriptInterface(object {
-                                @JavascriptInterface
-                                fun onFpsUpdate(fps: Int, ms: Float) {
-                                    post {
-                                        currentFps = fps
-                                        frameTimeMs = ms
+                                var pageFinished = false
+                                var initialBootStarted = false
+                                fun tryInitialBoot(wv: WebView?) {
+                                    if (wv == null || !pageFinished || initialBootStarted) return
+                                    if (wv.width > 100 && wv.height > 100) {
+                                        initialBootStarted = true
+                                        bootEngineInWebView(wv)
                                     }
                                 }
 
-                                @JavascriptInterface
-                                fun onEngineStatus(status: String, detail: String) {
-                                    post {
-                                        engineStatus = status
-                                        engineErrorDetail = detail
+                                addOnLayoutChangeListener { v, left, top, right, bottom, _, _, _, _ ->
+                                    if ((right - left) > 100 && (bottom - top) > 100) {
+                                        tryInitialBoot(v as? WebView)
                                     }
                                 }
 
-                                @JavascriptInterface
-                                fun onDiagnosticLog(level: String, line: String) {
-                                    post {
-                                        diagnosticLogs = (diagnosticLogs + "\n" + line).trim().takeLast(6000)
-                                        onDiagnosticLogsChanged(diagnosticLogs)
+                                addJavascriptInterface(object {
+                                    @JavascriptInterface
+                                    fun onFpsUpdate(fps: Int, ms: Float) {
+                                        post {
+                                            currentFps = fps
+                                            frameTimeMs = ms
+                                        }
                                     }
-                                }
 
-                                @JavascriptInterface
-                                fun onStageUpdate(stage: Int, status: String, detail: String) {
-                                    post {
-                                        stageStates[stage] = EngineStageInfo(status = status, detail = detail)
+                                    @JavascriptInterface
+                                    fun onLoadingTick(elapsed: Int, total: Int) {
+                                        post {
+                                            loadingElapsedSec = elapsed
+                                            if (total > 0) loadingTotalSec = total
+                                        }
                                     }
-                                }
+
+                                    @JavascriptInterface
+                                    fun onEngineStatus(status: String, detail: String) {
+                                        post {
+                                            engineStatus = status
+                                            engineErrorDetail = detail
+                                        }
+                                    }
+
+                                    @JavascriptInterface
+                                    fun onDiagnosticLog(level: String, line: String) {
+                                        post {
+                                            diagnosticLogs = (diagnosticLogs + "\n" + line).trim().takeLast(6000)
+                                            onDiagnosticLogsChanged(diagnosticLogs)
+                                        }
+                                    }
+
+                                    @JavascriptInterface
+                                    fun onStageUpdate(stage: Int, status: String, detail: String) {
+                                        post {
+                                            stageStates[stage] = EngineStageInfo(status = status, detail = detail)
+                                        }
+                                    }
 
                                 @JavascriptInterface
                                 fun onStateExported(cbName: String, dataJson: String) {
@@ -668,7 +710,9 @@ fun PlayScreen(
                                 }
 
                                 override fun onPageFinished(view: WebView?, url: String?) {
-                                    bootEngineInWebView(view)
+                                    pageFinished = true
+                                    tryInitialBoot(view)
+                                    view?.post { tryInitialBoot(view) }
                                 }
                             }
                             loadUrl("https://retroverse.local/emulator_host.html")
@@ -676,29 +720,45 @@ fun PlayScreen(
                     }
                 )
 
-                // Loading Overlay — completely unmounted as soon as engineStatus != "loading" (EJS_onGameStart)
-                if (engineStatus == "loading") {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color(0xD907080D)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CircularProgressIndicator(color = SecondaryCyan, strokeWidth = 3.dp)
-                            Spacer(Modifier.height(10.dp))
-                            Text(
-                                text = strings.engineLoadingText(resolvedCore.uppercase()),
-                                style = MaterialTheme.typography.titleMedium,
-                                color = Color.White
-                            )
-                            Text(
-                                text = game.title,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = TextSecondary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                    // Loading Overlay — completely unmounted as soon as engineStatus != "loading" (EJS_onGameStart)
+                    if (engineStatus == "loading") {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color(0xD907080D)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                CircularProgressIndicator(color = SecondaryCyan, strokeWidth = 3.dp)
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = strings.engineLoadingText(resolvedCore.uppercase()),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = if (isArabic) {
+                                        "جاري تحميل النواة... ($loadingElapsedSec / $loadingTotalSec ث)"
+                                    } else {
+                                        "Loading core... (${loadingElapsedSec}s / ${loadingTotalSec}s)"
+                                    },
+                                    style = MaterialTheme.typography.labelLarge.copy(
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = SecondaryCyan
+                                )
+                                Text(
+                                    text = game.title,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = TextSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
                 }
@@ -907,10 +967,11 @@ fun PlayScreen(
                     ) {
                         webViewContent(
                             Modifier
-                                .widthIn(max = 680.dp)
-                                .fillMaxWidth()
-                                .height(250.dp)
                                 .padding(horizontal = 10.dp, vertical = 4.dp)
+                                .widthIn(max = 520.dp)
+                                .fillMaxWidth()
+                                .aspectRatio(4f / 3f)
+                                .heightIn(min = 210.dp, max = 320.dp)
                         )
 
                         if (isEngineTestMode && engineStatus != "error") {

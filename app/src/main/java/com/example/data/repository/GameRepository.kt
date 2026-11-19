@@ -15,6 +15,8 @@ import com.example.service.RomBundler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
@@ -457,5 +459,127 @@ class GameRepository(
             file.writeBytes(bytes)
             file.absolutePath
         }.getOrNull()
+    }
+
+    suspend fun exportCoversAndCheatsBackup(): Pair<JSONArray, JSONArray> = withContext(Dispatchers.IO) {
+        val games = dao.getAllGamesOnce()
+        val cheats = dao.getAllCheatsOnce()
+        val gameById = games.associateBy { it.id }
+
+        val coversArr = JSONArray()
+        games.forEach { g ->
+            if (!g.coverUrl.isNullOrBlank() || g.isFavorite || !g.aiNotes.isNullOrBlank()) {
+                coversArr.put(JSONObject().apply {
+                    put("fileName", g.fileName)
+                    put("title", g.title)
+                    put("systemId", g.systemId)
+                    put("coverUrl", g.coverUrl ?: "")
+                    put("isFavorite", g.isFavorite)
+                    put("coreOverride", g.coreOverride)
+                    put("aiNotes", g.aiNotes ?: "")
+                })
+            }
+        }
+
+        val cheatsArr = JSONArray()
+        cheats.forEach { c ->
+            val g = gameById[c.gameId]
+            cheatsArr.put(JSONObject().apply {
+                put("gameFileName", g?.fileName ?: "")
+                put("gameTitle", g?.title ?: "")
+                put("systemId", g?.systemId ?: "")
+                put("name", c.name)
+                put("code", c.code)
+                put("cheatType", c.cheatType)
+                put("enabled", c.enabled)
+            })
+        }
+
+        coversArr to cheatsArr
+    }
+
+    suspend fun importCoversAndCheatsBackup(
+        coversArr: JSONArray?,
+        cheatsArr: JSONArray?
+    ): Pair<Int, Int> = withContext(Dispatchers.IO) {
+        val games = dao.getAllGamesOnce()
+        val existingCheats = dao.getAllCheatsOnce()
+        val existingCheatKeys = existingCheats.map { "${it.gameId}|${it.code.trim()}" }.toMutableSet()
+
+        fun findMatchingGame(fileName: String, title: String, systemId: String): GameEntity? {
+            if (fileName.isNotBlank()) {
+                games.firstOrNull { it.fileName.equals(fileName, ignoreCase = true) }?.let { return it }
+            }
+            if (title.isNotBlank()) {
+                games.firstOrNull {
+                    it.title.equals(title, ignoreCase = true) &&
+                        (systemId.isBlank() || it.systemId.equals(systemId, ignoreCase = true))
+                }?.let { return it }
+            }
+            return null
+        }
+
+        var restoredCovers = 0
+        if (coversArr != null) {
+            for (i in 0 until coversArr.length()) {
+                val obj = coversArr.optJSONObject(i) ?: continue
+                val game = findMatchingGame(
+                    obj.optString("fileName", ""),
+                    obj.optString("title", ""),
+                    obj.optString("systemId", "")
+                ) ?: continue
+
+                val coverUrl = obj.optString("coverUrl", "").takeIf { it.isNotBlank() }
+                if (coverUrl != null) {
+                    val isUsableLocal = !coverUrl.startsWith("file:") ||
+                        File(Uri.parse(coverUrl).path.orEmpty()).exists()
+                    if (isUsableLocal) {
+                        dao.updateCoverUrl(game.id, coverUrl)
+                        restoredCovers++
+                    }
+                }
+                if (obj.has("isFavorite")) {
+                    dao.setFavorite(game.id, obj.optBoolean("isFavorite", game.isFavorite))
+                }
+                val notes = obj.optString("aiNotes", "").takeIf { it.isNotBlank() }
+                if (notes != null) {
+                    dao.updateAiNotes(game.id, notes)
+                }
+            }
+        }
+
+        var restoredCheats = 0
+        val toInsert = mutableListOf<CheatEntity>()
+        if (cheatsArr != null) {
+            for (i in 0 until cheatsArr.length()) {
+                val obj = cheatsArr.optJSONObject(i) ?: continue
+                val game = findMatchingGame(
+                    obj.optString("gameFileName", ""),
+                    obj.optString("gameTitle", ""),
+                    obj.optString("systemId", "")
+                ) ?: continue
+
+                val code = obj.optString("code", "").trim()
+                if (code.isBlank()) continue
+                val dedupKey = "${game.id}|$code"
+                if (existingCheatKeys.add(dedupKey)) {
+                    toInsert.add(
+                        CheatEntity(
+                            gameId = game.id,
+                            name = obj.optString("name", "Cheat"),
+                            code = code,
+                            cheatType = obj.optString("cheatType", "Raw"),
+                            enabled = obj.optBoolean("enabled", true)
+                        )
+                    )
+                    restoredCheats++
+                }
+            }
+            if (toInsert.isNotEmpty()) {
+                dao.insertCheats(toInsert)
+            }
+        }
+
+        restoredCovers to restoredCheats
     }
 }

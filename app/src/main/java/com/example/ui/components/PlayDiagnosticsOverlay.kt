@@ -87,7 +87,7 @@ fun PlayDiagnosticsOverlay(
     val stageTitle = when (failedStageTag) {
         "STAGE_1" -> if (isArabic) "فشل المرحلة [1]: إنشاء حاوية iframe بحجم ظاهر" else "Stage [1] Failed: iframe mount size"
         "STAGE_2" -> if (isArabic) "فشل المرحلة [2]: تحميل ملف loader.js من الـ CDN" else "Stage [2] Failed: loader.js load"
-        "STAGE_3" -> if (isArabic) "فشل المرحلة [3]: لم يتم إنشاء window.EJS_emulator خلال 3 ثوانٍ" else "Stage [3] Failed: window.EJS_emulator missing at 3s"
+        "STAGE_3" -> if (isArabic) "فشل المرحلة [3]: لم يتم إنشاء window.EJS_emulator خلال 15 ثانية" else "Stage [3] Failed: window.EJS_emulator missing at 15s"
         "STAGE_4" -> if (isArabic) "فشل المرحلة [4]: تعذر تحميل ملفات النواة عبر الشبكة" else "Stage [4] Failed: CDN asset fetch"
         "STAGE_5" -> if (isArabic) "فشل المرحلة [5]: لم يبدأ تشغيل النواة (EJS_onGameStart)" else "Stage [5] Failed: EJS_onGameStart timeout"
         "STAGE_6" -> if (isArabic) "فشل المرحلة [6]: خطأ برمجي / WebGL داخل المحرك" else "Stage [6] Failed: WebGL or JS Runtime error"
@@ -266,7 +266,7 @@ fun EngineStagesChecklistCard(
     val stageLabels = listOf(
         1 to (if (isArabic) "[1] إنشاء iframe وحجمه" else "[1] iframe created & sized"),
         2 to (if (isArabic) "[2] تحميل loader.js" else "[2] loader.js script loaded"),
-        3 to (if (isArabic) "[3] وجود window.EJS_emulator (3ث)" else "[3] window.EJS_emulator (3s)"),
+        3 to (if (isArabic) "[3] وجود window.EJS_emulator (15ث)" else "[3] window.EJS_emulator (15s)"),
         4 to (if (isArabic) "[4] طلبات CDN (fetch/XHR)" else "[4] CDN fetch/XHR requests"),
         5 to (if (isArabic) "[5] EJS_ready و EJS_onGameStart" else "[5] EJS_ready & onGameStart"),
         6 to (if (isArabic) "[6] استقرار JS/WebGL" else "[6] JS/WebGL runtime clean")
@@ -306,13 +306,23 @@ fun EngineStagesChecklistCard(
                 }
                 if (info.detail.isNotBlank()) {
                     Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = info.detail,
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = JetBrainsMonoFontFamily, fontSize = 10.sp),
-                        color = tint,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        Text(
+                            text = info.detail,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = JetBrainsMonoFontFamily,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = tint,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(tint.copy(alpha = 0.14f))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
                 }
             }
         }

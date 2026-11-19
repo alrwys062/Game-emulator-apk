@@ -806,8 +806,16 @@ class RetroViewModel(application: Application) : AndroidViewModel(application) {
 
     fun exportBackupJson(onResult: (String) -> Unit) {
         viewModelScope.launch {
-            val json = settingsRepo.exportSettingsJson()
-            onResult(json)
+            val settingsObj = org.json.JSONObject(settingsRepo.exportSettingsJson())
+            val (coversArr, cheatsArr) = gameRepo.exportCoversAndCheatsBackup()
+            val bundle = org.json.JSONObject().apply {
+                put("version", 2)
+                put("exportedAt", System.currentTimeMillis())
+                put("settings", settingsObj)
+                put("covers", coversArr)
+                put("cheats", cheatsArr)
+            }
+            onResult(bundle.toString(2))
         }
     }
 
@@ -815,8 +823,24 @@ class RetroViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val isAr = settings.value.language == "ar"
             runCatching {
-                settingsRepo.importSettingsJson(json)
-                showToast(if (isAr) "تمت استعادة الإعدادات والتخطيطات بنجاح" else "Backup restored successfully")
+                val root = org.json.JSONObject(json)
+                val settingsJson = if (root.has("settings")) {
+                    root.getJSONObject("settings").toString()
+                } else {
+                    json
+                }
+                settingsRepo.importSettingsJson(settingsJson)
+                val (coversCount, cheatsCount) = gameRepo.importCoversAndCheatsBackup(
+                    root.optJSONArray("covers"),
+                    root.optJSONArray("cheats")
+                )
+                showToast(
+                    if (isAr) {
+                        "تمت استعادة الإعدادات ($coversCount غلافاً و$cheatsCount كود غش) بنجاح"
+                    } else {
+                        "Restored settings, $coversCount covers & $cheatsCount cheats"
+                    }
+                )
             }.onFailure {
                 showToast(if (isAr) "صيغة ملف النسخة الاحتياطية غير صالحة" else "Invalid backup JSON format")
             }
