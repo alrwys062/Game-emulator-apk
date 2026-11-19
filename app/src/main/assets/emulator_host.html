@@ -32,6 +32,12 @@
     justify-content: center;
     overflow: hidden;
   }
+  #frame-mount {
+    width: 100%;
+    height: 100%;
+    display: block;
+    position: relative;
+  }
   #ejs-frame {
     width: 100%;
     height: 100%;
@@ -47,7 +53,7 @@
     background: #07080D;
     display: none;
   }
-  /* Visual CRT / Scanlines / LCD overlays handled cleanly in CSS so WebGL shaders never black-screen */
+  /* Visual CRT / Scanlines / LCD overlays handled in CSS without touching canvas WebGL */
   #scanlines-overlay {
     pointer-events: none;
     position: absolute;
@@ -86,7 +92,6 @@
   .filter-smooth #ejs-frame, .filter-smooth #hbCanvas { image-rendering: auto; }
   .scanlines-on #scanlines-overlay { opacity: 0.85; }
 
-  /* Aspect ratios applied safely on the viewport wrapper */
   .aspect-43 #viewport { max-width: calc(100vh * 4 / 3); aspect-ratio: 4 / 3; }
   .aspect-169 #viewport { max-width: calc(100vh * 16 / 9); aspect-ratio: 16 / 9; }
   .aspect-orig #viewport { width: 100%; height: 100%; }
@@ -97,7 +102,7 @@
 <body class="filter-sharp aspect-orig">
   <div id="stage">
     <div id="viewport">
-      <div id="frame-mount" style="width:100%;height:100%;display:block;"></div>
+      <div id="frame-mount"></div>
       <canvas id="hbCanvas" width="320" height="240"></canvas>
     </div>
     <div id="scanlines-overlay"></div>
@@ -107,7 +112,7 @@
 <script>
 (function() {
   const CDN_PRIMARY = 'https://cdn.emulatorjs.org/stable/data/';
-  const CDN_FALLBACK = 'https://cdn.jsdelivr.net/gh/EmulatorJS/EmulatorJS@latest/data/';
+  const CDN_FALLBACK = 'https://cdn.jsdelivr.net/gh/EmulatorJS/EmulatorJS@main/data/';
 
   let mode = 'idle'; // 'emulatorjs' | 'homebrew'
   let activeFrame = null;
@@ -124,8 +129,12 @@
   let paused = false;
   let frameStarted = false;
   let renderScalePercent = 100;
+  let autoRetriedFallback = false;
+  let activeBootId = 0;
+  let currentCdnUsed = CDN_PRIMARY;
+  let highestFailedStage = 0;
+  let stageMap = { 1: 'pending', 2: 'pending', 3: 'pending', 4: 'pending', 5: 'pending', 6: 'pending' };
 
-  // Input state for homebrew fallback & keyboard dispatch
   const hbKeys = {
     up: false, down: false, left: false, right: false,
     a: false, b: false, x: false, y: false,
@@ -135,12 +144,29 @@
   function addLog(level, message) {
     const line = '[' + new Date().toISOString().substr(11, 8) + '][' + level + '] ' + String(message);
     logs.push(line);
-    if (logs.length > 200) logs.shift();
+    if (logs.length > 260) logs.shift();
     try {
       if (window.RetroHost && window.RetroHost.onDiagnosticLog) {
         window.RetroHost.onDiagnosticLog(level, line);
       }
     } catch (_) {}
+  }
+
+  function setStage(stageNum, status, detail) {
+    stageMap[stageNum] = status;
+    if (status === 'fail') highestFailedStage = stageNum;
+    try {
+      if (window.RetroHost && window.RetroHost.onStageUpdate) {
+        window.RetroHost.onStageUpdate(stageNum, status, detail || '');
+      }
+    } catch (_) {}
+  }
+
+  function resetStages() {
+    highestFailedStage = 0;
+    for (let i = 1; i <= 6; i++) {
+      setStage(i, 'pending', '');
+    }
   }
 
   function notifyStatus(status, detail) {
@@ -149,6 +175,16 @@
         window.RetroHost.onEngineStatus(status, detail || '');
       }
     } catch (_) {}
+  }
+
+  function firstUnpassedStage() {
+    for (let i = 1; i <= 6; i++) {
+      if (stageMap[i] === 'fail') return i;
+    }
+    for (let i = 1; i <= 5; i++) {
+      if (stageMap[i] !== 'pass') return i;
+    }
+    return 5;
   }
 
   function checkWebGL2() {
@@ -171,87 +207,73 @@
     }
   }
 
-  function destroyActiveFrame() {
+  function destroyActiveFrame(revokeBlobs) {
     clearWatchdog();
     if (activeFrame) {
-      try { activeFrame.srcdoc = 'about:blank'; } catch (_) {}
+      try { activeFrame.srcdoc = ''; } catch (_) {}
       try { activeFrame.remove(); } catch (_) {}
       activeFrame = null;
     }
-    if (activeBlobUrl) {
-      try { URL.revokeObjectURL(activeBlobUrl); } catch (_) {}
-      activeBlobUrl = null;
-    }
-    if (activeBiosBlobUrl) {
-      try { URL.revokeObjectURL(activeBiosBlobUrl); } catch (_) {}
-      activeBiosBlobUrl = null;
+    const mount = document.getElementById('frame-mount');
+    if (mount) mount.innerHTML = '';
+    if (revokeBlobs !== false) {
+      if (activeBlobUrl) {
+        try { URL.revokeObjectURL(activeBlobUrl); } catch (_) {}
+        activeBlobUrl = null;
+      }
+      if (activeBiosBlobUrl) {
+        try { URL.revokeObjectURL(activeBiosBlobUrl); } catch (_) {}
+        activeBiosBlobUrl = null;
+      }
     }
     frameStarted = false;
   }
 
-  // Generate a valid minimal 24KB iNES ROM (real 6502 code that cycles colors & responds to input)
-  // Used for the "Engine Test" button so users can verify the real WASM core renders frames
-  function createTestNesRomBytes() {
-    const prgSize = 16384;
-    const chrSize = 8192;
-    const rom = new Uint8Array(16 + prgSize + chrSize);
-    // iNES Header: "NES\x1a", 1x16KB PRG, 1x8KB CHR, mapper 0
-    rom[0] = 0x4E; rom[1] = 0x45; rom[2] = 0x53; rom[3] = 0x1A;
-    rom[4] = 1; rom[5] = 1; rom[6] = 0; rom[7] = 0;
+  // Embedded valid GBA Homebrew ROM (ARM7TDMI Mode 3 animated shader-wave framebuffer, no BIOS needed)
+  function createTestGbaRomBytes() {
+    const rom = new Uint8Array(4096);
+    const w32 = (off, val) => {
+      rom[off] = val & 0xFF;
+      rom[off + 1] = (val >>> 8) & 0xFF;
+      rom[off + 2] = (val >>> 16) & 0xFF;
+      rom[off + 3] = (val >>> 24) & 0xFF;
+    };
+    // 0x00: Entry ARM branch B 0x080000C0
+    w32(0x00, 0xEA00002E);
+    const title = 'RETROVERSE  ';
+    for (let i = 0; i < 12; i++) rom[0xA0 + i] = title.charCodeAt(i);
+    rom[0xAC] = 0x41; rom[0xAD] = 0x52; rom[0xAE] = 0x56; rom[0xAF] = 0x45; // Game code ARVE
+    rom[0xB0] = 0x30; rom[0xB1] = 0x31; // Maker code 01
+    rom[0xB2] = 0x96; // Required fixed value
+    let chk = 0;
+    for (let i = 0xA0; i <= 0xBC; i++) chk = (chk - rom[i]) & 0xFF;
+    rom[0xBD] = (chk - 0x19) & 0xFF;
 
-    // 6502 Reset routine at $8000 (offset 16)
-    const code = [
-      0x78,             // SEI
-      0xD8,             // CLD
-      0xA2, 0xFF,       // LDX #$FF
-      0x9A,             // TXS
-      0xA9, 0x00,       // LDA #$00
-      0x8D, 0x00, 0x20, // STA $2000 (PPUCTRL off)
-      0x8D, 0x01, 0x20, // STA $2001 (PPUMASK off)
-      // Wait 2 vblanks
-      0x2C, 0x02, 0x20, // BIT $2002
-      0x10, 0xFB,       // BPL -5
-      0x2C, 0x02, 0x20, // BIT $2002
-      0x10, 0xFB,       // BPL -5
-      // Set universal background color at PPU $3F00
-      0xA9, 0x3F,       // LDA #$3F
-      0x8D, 0x06, 0x20, // STA $2006
-      0xA9, 0x00,       // LDA #$00
-      0x8D, 0x06, 0x20, // STA $2006
-      0xA9, 0x14,       // LDA #$14 (vivid violet)
-      0x8D, 0x07, 0x20, // STA $2007
-      // Enable rendering (background + color)
-      0xA9, 0x80,       // LDA #$80 (NMI on)
-      0x8D, 0x00, 0x20, // STA $2000
-      0xA9, 0x08,       // LDA #$08 (show bg)
-      0x8D, 0x01, 0x20, // STA $2001
-      // Forever loop
-      0x4C, 0x2F, 0x80  // JMP $802F
+    // 0xC0: ARM7TDMI loop writing Mode 3 (240x160 RGB555) animated waves to VRAM
+    const prog = [
+      0xE3A00301, // mov r0, #0x04000000 (REG_BASE)
+      0xE3A01C04, // mov r1, #0x0400
+      0xE3811003, // orr r1, r1, #0x03 (Mode 3 + BG2)
+      0xE1C010B0, // strh r1, [r0] (REG_DISPCNT = 0x0403)
+      0xE3A02406, // mov r2, #0x06000000 (VRAM)
+      0xE3A04C96, // mov r4, #0x9600 (38400 pixels)
+      0xE3A05000, // mov r5, #0 (color seed)
+      // loop_frame:
+      0xE1D010B6, // ldrh r1, [r0, #6] (REG_VCOUNT)
+      0xE35100A0, // cmp r1, #160
+      0x1AFFFFFC, // bne loop_frame
+      0xE3A03000, // mov r3, #0
+      0xE1A07005, // mov r7, r5
+      // fill_loop:
+      0xE18270B3, // strh r7, [r2, r3]
+      0xE2877001, // add r7, r7, #1
+      0xE2833002, // add r3, r3, #2
+      0xE1530084, // cmp r3, r4, lsl #1
+      0x1AFFFFFA, // bne fill_loop
+      0xE2855020, // add r5, r5, #32
+      0xEAFFFFF3  // b loop_frame
     ];
-    for (let i = 0; i < code.length; i++) rom[16 + i] = code[i];
-
-    // NMI handler at $8050 (offset 16 + 0x50 = 96): cycle palette color slowly in zero page $00/$01
-    const nmi = [
-      0xE6, 0x00,       // INC $00
-      0xA5, 0x00,       // LDA $00
-      0x29, 0x1F,       // AND #$1F
-      0xD0, 0x12,       // BNE +18 (skip update)
-      0xE6, 0x01,       // INC $01
-      0xA9, 0x3F,       // LDA #$3F
-      0x8D, 0x06, 0x20, // STA $2006
-      0xA9, 0x00,       // LDA #$00
-      0x8D, 0x06, 0x20, // STA $2006
-      0xA5, 0x01,       // LDA $01
-      0x29, 0x3F,       // AND #$3F
-      0x8D, 0x07, 0x20, // STA $2007
-      0x40              // RTI
-    ];
-    for (let i = 0; i < nmi.length; i++) rom[16 + 0x50 + i] = nmi[i];
-
-    // Vectors at end of 16KB PRG ($FFFA..$FFFF -> offset 16 + 0x3FFA)
-    rom[16 + 0x3FFA] = 0x50; rom[16 + 0x3FFB] = 0x80; // NMI -> $8050
-    rom[16 + 0x3FFC] = 0x00; rom[16 + 0x3FFD] = 0x80; // RESET -> $8000
-    rom[16 + 0x3FFE] = 0x50; rom[16 + 0x3FFF] = 0x80; // IRQ -> $8050
+    for (let i = 0; i < prog.length; i++) w32(0xC0 + i * 4, prog[i]);
     return rom;
   }
 
@@ -271,6 +293,7 @@
 
   function buildIframeSrcdoc(params) {
     const cfgJson = JSON.stringify({
+      bootId: params.bootId,
       core: params.core,
       romUrl: params.romUrl,
       gameName: params.gameName,
@@ -280,8 +303,7 @@
       cheats: params.cheats || [],
       defaultOptions: params.defaultOptions || {},
       volume: params.volume,
-      muted: params.muted,
-      renderScalePercent: params.renderScalePercent || 100
+      muted: params.muted
     });
 
     return '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
@@ -295,57 +317,86 @@
       '</style></head><body><div id="game"></div>' +
       '<script>' +
       'var CFG=' + cfgJson + ';' +
-      'function postParent(type,payload){try{window.parent.postMessage({__rv:true,type:type,payload:payload},"*");}catch(_){}}' +
-      'window.onerror=function(msg,src,line,col,err){postParent("error",msg+" ("+src+":"+line+")");};' +
-      'window.addEventListener("unhandledrejection",function(e){postParent("error","Promise rejection: "+(e.reason&&e.reason.message?e.reason.message:e.reason));});' +
-      'var origErr=console.error;console.error=function(){try{postParent("console_error",Array.prototype.slice.call(arguments).join(" "));}catch(_){}return origErr.apply(console,arguments);};' +
-      'var origWarn=console.warn;console.warn=function(){try{postParent("console_warn",Array.prototype.slice.call(arguments).join(" "));}catch(_){}return origWarn.apply(console,arguments);};' +
+      'function postParent(type,payload){try{window.parent.postMessage({__rv:true,bootId:CFG.bootId,type:type,payload:payload},"*");}catch(_){}}' +
 
-      // Set EmulatorJS globals strictly BEFORE loading loader.js
+      // [6] Runtime errors, unhandled rejections, console.error inside iframe
+      'window.onerror=function(msg,src,line,col){postParent("stage_6_err","window.onerror: "+msg+" @"+(src||"")+":"+line);};' +
+      'window.addEventListener("unhandledrejection",function(e){var r=e&&e.reason;postParent("stage_6_err","unhandledrejection: "+(r&&r.message?r.message:String(r)));});' +
+      'var origErr=console.error;console.error=function(){try{postParent("stage_6_err","console.error: "+Array.prototype.slice.call(arguments).join(" "));}catch(_){}return origErr.apply(console,arguments);};' +
+
+      // [4] Wrap fetch and XMLHttpRequest BEFORE loading loader.js
+      '(function(){' +
+      '  var origFetch=window.fetch;' +
+      '  if(origFetch){' +
+      '    window.fetch=function(input,init){' +
+      '      var url=(typeof input==="string")?input:(input&&input.url?input.url:String(input));' +
+      '      var isLocalBlob=url.indexOf("blob:")===0||url.indexOf("data:")===0;' +
+      '      return origFetch.apply(this,arguments).then(function(res){' +
+      '        if(!isLocalBlob)postParent("net_log",{ok:res.ok,url:url,status:res.status,via:"fetch"});' +
+      '        return res;' +
+      '      }).catch(function(err){' +
+      '        if(!isLocalBlob)postParent("net_log",{ok:false,url:url,status:0,error:(err&&err.message?err.message:String(err)),via:"fetch"});' +
+      '        throw err;' +
+      '      });' +
+      '    };' +
+      '  }' +
+      '  var origOpen=XMLHttpRequest.prototype.open;' +
+      '  var origSend=XMLHttpRequest.prototype.send;' +
+      '  XMLHttpRequest.prototype.open=function(method,url){' +
+      '    this.__rvUrl=String(url||"");' +
+      '    this.__rvMethod=String(method||"GET");' +
+      '    return origOpen.apply(this,arguments);' +
+      '  };' +
+      '  XMLHttpRequest.prototype.send=function(){' +
+      '    var xhr=this,u=xhr.__rvUrl||"";' +
+      '    var isLocalBlob=u.indexOf("blob:")===0||u.indexOf("data:")===0;' +
+      '    if(!isLocalBlob&&u){' +
+      '      xhr.addEventListener("loadend",function(){' +
+      '        var ok=xhr.status>=200&&xhr.status<400;' +
+      '        postParent("net_log",{ok:ok,url:u,status:xhr.status,via:"XHR"});' +
+      '      });' +
+      '      xhr.addEventListener("error",function(){' +
+      '        postParent("net_log",{ok:false,url:u,status:xhr.status||0,error:"XHR network error",via:"XHR"});' +
+      '      });' +
+      '    }' +
+      '    return origSend.apply(this,arguments);' +
+      '  };' +
+      '})();' +
+
+      // Set EmulatorJS globals in exact documented order BEFORE appending loader.js
       'window.EJS_player="#game";' +
       'window.EJS_core=CFG.core;' +
       'window.EJS_gameUrl=CFG.romUrl;' +
       'window.EJS_gameName=CFG.gameName;' +
       'window.EJS_pathtodata=CFG.pathtodata;' +
       'window.EJS_startOnLoaded=true;' +
+      'if(CFG.biosUrl){window.EJS_biosUrl=CFG.biosUrl;}' +
+      'if(CFG.cheats&&CFG.cheats.length>0){window.EJS_cheats=CFG.cheats;}' +
+      'window.EJS_defaultOptions=CFG.defaultOptions;' +
       'window.EJS_threads=CFG.threads;' +
       'window.EJS_color="#8B5CF6";' +
       'window.EJS_AdUrl="";' +
       'window.EJS_HideSettings=true;' +
-      'if(CFG.biosUrl){window.EJS_biosUrl=CFG.biosUrl;}' +
-      'if(CFG.cheats&&CFG.cheats.length>0){window.EJS_cheats=CFG.cheats;}' +
-      'window.EJS_defaultOptions=CFG.defaultOptions;' +
 
-      'var frameReported=false;' +
-      'function checkCanvasReady(){' +
-      '  var c=document.querySelector("#game canvas");' +
-      '  if(c&&c.width>0&&c.height>0){' +
-      '    if(!frameReported){frameReported=true;postParent("started",{width:c.width,height:c.height});}' +
-      '    return true;' +
-      '  }' +
-      '  return false;' +
-      '}' +
-
+      'var startReported=false;' +
+      // [5] EJS_ready and EJS_onGameStart
+      'window.EJS_ready=function(){postParent("stage_5_ready",CFG.core);};' +
       'window.EJS_onGameStart=function(){' +
-      '  postParent("ejs_start",{core:CFG.core});' +
+      '  if(!startReported){startReported=true;postParent("stage_5_start",{core:CFG.core,hasEmu:!!window.EJS_emulator});}' +
       '  try{' +
-      '    if(window.EJS_emulator){' +
-      '      if(typeof window.EJS_emulator.setVolume==="function"){window.EJS_emulator.setVolume(CFG.muted?0:CFG.volume);}' +
+      '    if(window.EJS_emulator&&typeof window.EJS_emulator.setVolume==="function"){' +
+      '      window.EJS_emulator.setVolume(CFG.muted?0:CFG.volume);' +
       '    }' +
       '  }catch(_){}' +
-      '  setTimeout(function(){window.dispatchEvent(new Event("resize"));checkCanvasReady();},120);' +
-      '  setTimeout(function(){window.dispatchEvent(new Event("resize"));checkCanvasReady();},600);' +
+      '  setTimeout(function(){window.dispatchEvent(new Event("resize"));},120);' +
+      '  setTimeout(function(){' +
+      '    window.dispatchEvent(new Event("resize"));' +
+      '    var c=document.querySelector("#game canvas");' +
+      '    if(c)postParent("canvas_size",{w:c.width,h:c.height});' +
+      '  },500);' +
       '};' +
 
-      // Periodic canvas watcher inside iframe
-      'var watchCount=0;' +
-      'var cWatcher=setInterval(function(){' +
-      '  watchCount++;' +
-      '  if(checkCanvasReady()){clearInterval(cWatcher);}' +
-      '  if(watchCount>200){clearInterval(cWatcher);}' +
-      '},150);' +
-
-      // Parent command listener (inputs, save/load states, speed, volume, cheats, disc)
+      // Parent command listener (inputs, save/load, speed, rewind, cheats, disc, screenshot)
       'window.addEventListener("message",function(ev){' +
       '  var d=ev.data;if(!d||!d.__rv_cmd)return;' +
       '  var emu=window.EJS_emulator;var gm=emu&&emu.gameManager;' +
@@ -383,44 +434,89 @@
       '      var url="";try{if(c)url=c.toDataURL("image/png");}catch(_){}' +
       '      postParent("screenshot_taken",{reqId:d.reqId,dataUrl:url});' +
       '    }' +
-      '  }catch(err){postParent("error","CMD "+d.cmd+": "+err.message);}' +
+      '  }catch(err){postParent("stage_6_err","CMD "+d.cmd+": "+err.message);}' +
       '});' +
 
-      // Finally append loader.js AFTER all globals are set
+      // [2] Append loader.js AFTER all globals & hooks + [3] Check EJS_emulator after 3 seconds
       'var s=document.createElement("script");' +
       's.src=CFG.pathtodata+"loader.js";' +
-      's.onerror=function(){postParent("loader_failed",CFG.pathtodata);};' +
+      's.onload=function(){postParent("stage_2",{ok:true,url:s.src});};' +
+      's.onerror=function(){postParent("stage_2",{ok:false,url:s.src});};' +
       'document.body.appendChild(s);' +
+      'setTimeout(function(){postParent("stage_3",{ok:!!window.EJS_emulator});},3000);' +
       '<\/script></body></html>';
   }
 
-  // Listen to iframe postMessage events
+  function tryFallbackCdnOrFail(failedStageNum, failReason) {
+    if (frameStarted) return;
+    if (!autoRetriedFallback && currentCdnUsed !== CDN_FALLBACK && lastConfig) {
+      autoRetriedFallback = true;
+      addLog('WARN', '[AUTO-FALLBACK] Stage [' + failedStageNum + '] failed (' + failReason + '). Retrying once with ' + CDN_FALLBACK);
+      const retryCfg = Object.assign({}, lastConfig, { cdnOverride: CDN_FALLBACK, __isFallbackRetry: true });
+      window.RetroEngine.bootRom(retryCfg);
+      return;
+    }
+    clearWatchdog();
+    notifyStatus('error', 'STAGE_' + failedStageNum + '|' + failReason);
+  }
+
+  // Listen to iframe postMessage events (Stages 2..6 + bridge responses)
   window.addEventListener('message', function(ev) {
     const d = ev.data;
     if (!d || !d.__rv) return;
-    if (d.type === 'error' || d.type === 'console_error') {
-      addLog('ERR', d.payload);
-    } else if (d.type === 'console_warn') {
-      addLog('WARN', d.payload);
-    } else if (d.type === 'loader_failed') {
-      addLog('ERR', 'Failed to load loader.js from: ' + d.payload);
-      clearWatchdog();
-      notifyStatus('error', 'CDN_LOAD_FAILED|' + d.payload);
-    } else if (d.type === 'ejs_start') {
-      addLog('INFO', 'EJS_onGameStart fired for core: ' + (d.payload && d.payload.core));
-    } else if (d.type === 'started') {
+    if (d.bootId && d.bootId !== activeBootId) return;
+
+    if (d.type === 'stage_2') {
+      const p = d.payload || {};
+      if (p.ok) {
+        addLog('INFO', '[2] تحميل loader.js: نجح (' + p.url + ')');
+        setStage(2, 'pass', p.url);
+      } else {
+        addLog('ERR', '[2] تحميل loader.js: فشل (' + p.url + ')');
+        setStage(2, 'fail', p.url);
+        tryFallbackCdnOrFail(2, 'فشل تحميل loader.js من ' + p.url);
+      }
+    } else if (d.type === 'stage_3') {
+      const ok = !!(d.payload && d.payload.ok);
+      if (ok || frameStarted) {
+        addLog('INFO', '[3] وجود window.EJS_emulator بعد 3 ثوانٍ: نعم');
+        setStage(3, 'pass', 'نعم');
+      } else {
+        addLog('ERR', '[3] وجود window.EJS_emulator بعد 3 ثوانٍ: لا');
+        setStage(3, 'fail', 'لا');
+        tryFallbackCdnOrFail(3, 'لم يتم تهيئة window.EJS_emulator خلال 3 ثوانٍ');
+      }
+    } else if (d.type === 'net_log') {
+      const n = d.payload || {};
+      const msg = '[4] ' + (n.via || 'net') + ' ' + n.url + ' -> ' + (n.ok ? ('HTTP ' + n.status) : (n.error || ('HTTP ' + n.status)));
+      addLog(n.ok ? 'INFO' : 'ERR', msg);
+      if (n.ok) {
+        if (stageMap[4] !== 'fail') setStage(4, 'pass', 'HTTP ' + n.status);
+      } else {
+        setStage(4, 'fail', (n.status ? 'HTTP ' + n.status : n.error) + ' @ ' + n.url);
+      }
+    } else if (d.type === 'stage_5_ready') {
+      addLog('INFO', '[5] EJS_ready تم استدعاؤه للنواة: ' + d.payload);
+    } else if (d.type === 'stage_5_start') {
       frameStarted = true;
       clearWatchdog();
-      addLog('INFO', 'First rendered frame detected: ' + JSON.stringify(d.payload));
+      if (stageMap[3] !== 'pass') setStage(3, 'pass', 'نعم');
+      if (stageMap[4] === 'pending') setStage(4, 'pass', 'OK');
+      setStage(5, 'pass', 'EJS_onGameStart');
+      if (stageMap[6] !== 'fail') setStage(6, 'pass', 'بدون أخطاء JS');
+      addLog('INFO', '[5] EJS_onGameStart تم بنجاح! إخفاء شاشة التحميل بالكامل.');
       notifyStatus('running', (lastConfig && lastConfig.core) || '');
-      let fakeCounter = 0;
       fpsTimer = setInterval(() => {
-        fakeCounter++;
         const fps = paused ? 0 : 60;
         if (window.RetroHost && window.RetroHost.onFpsUpdate) {
           window.RetroHost.onFpsUpdate(fps, 16.6);
         }
       }, 1000);
+    } else if (d.type === 'canvas_size') {
+      addLog('INFO', '[5] أبعاد Canvas: ' + d.payload.w + '×' + d.payload.h);
+    } else if (d.type === 'stage_6_err') {
+      addLog('ERR', '[6] ' + d.payload);
+      if (!frameStarted) setStage(6, 'fail', String(d.payload).slice(0, 120));
     } else if (d.type === 'state_exported') {
       pendingCallbacks[d.payload.reqId] && pendingCallbacks[d.payload.reqId](d.payload.data);
       delete pendingCallbacks[d.payload.reqId];
@@ -439,7 +535,7 @@
     }
   }
 
-  // Homebrew mini-cartridge fallback (only for bundled demo items with no ROM file)
+  // Homebrew mini-cartridge fallback for built-in demo entries with no ROM file
   const hbCanvas = document.getElementById('hbCanvas');
   const hbCtx = hbCanvas.getContext('2d');
   let hbAnim = null;
@@ -457,14 +553,14 @@
   }
 
   function startHomebrew(title, sys, kind) {
-    destroyActiveFrame();
+    destroyActiveFrame(true);
     mode = 'homebrew';
     hbKind = kind || 'racer';
     hbSys = sys || 'PS1';
     hbRewind = [];
     document.getElementById('frame-mount').style.display = 'none';
     hbCanvas.style.display = 'block';
-    hbState = { px: 160, py: 185, vx: 0, vy: 0, score: 0, speed: 2.8, road: 0, ticks: 0, grounded: false };
+    hbState = { px: 160, py: 185, vx: 0, vy: 0, score: 0, speed: 2.8, road: 0, ticks: 0 };
     notifyStatus('running', 'homebrew');
     let frames = 0, lastT = performance.now();
     function tick() {
@@ -506,19 +602,19 @@
     hbAnim = requestAnimationFrame(tick);
   }
 
-  // Public API called from Android PlayScreen
   window.RetroEngine = {
     bootHomebrew: function(title, sys, kind) {
       startHomebrew(title, sys, kind);
     },
 
     bootEngineTest: function(cdnMode, customDataPath) {
-      const romBytes = createTestNesRomBytes();
+      const romBytes = createTestGbaRomBytes();
       const blob = new Blob([romBytes], { type: 'application/octet-stream' });
       const blobUrl = URL.createObjectURL(blob);
+      activeBlobUrl = blobUrl;
       window.RetroEngine.bootRom({
-        title: 'RetroVerse NES Hardware Test',
-        core: 'nes',
+        title: 'RetroVerse GBA Test ROM',
+        core: 'gba',
         romUrl: blobUrl,
         isAlreadyBlob: true,
         fileSizeBytes: romBytes.length,
@@ -536,8 +632,19 @@
 
     bootRom: async function(config) {
       stopHomebrew();
-      destroyActiveFrame();
-      logs = [];
+      const isFallbackRetry = !!config.__isFallbackRetry;
+      if (!isFallbackRetry) {
+        autoRetriedFallback = false;
+        logs = [];
+        resetStages();
+      } else {
+        // Keep stage 1..6 history clear for retry
+        resetStages();
+      }
+      destroyActiveFrame(!isFallbackRetry);
+
+      activeBootId++;
+      const thisBootId = activeBootId;
       mode = 'emulatorjs';
       lastConfig = config;
       bootStartTime = performance.now();
@@ -547,76 +654,73 @@
       mount.style.display = 'block';
       notifyStatus('loading', config.core || 'auto');
 
-      // 0.5 Pre-flight environment diagnostics
       const online = navigator.onLine;
       const webglOk = checkWebGL2();
       const isolated = !!window.crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined';
-      const core = config.core || 'nes';
+      const core = config.core || 'gba';
       const isPsp = (core === 'psp' || core === 'ppsspp');
 
-      addLog('INFO', 'Booting core=' + core + ', online=' + online + ', webgl=' + webglOk + ', isolated=' + isolated);
+      addLog('INFO', 'Boot core=' + core + ', online=' + online + ', webgl=' + webglOk + ', isolated=' + isolated);
 
       if (!webglOk) {
-        addLog('ERR', 'WebGL/WebGL2 context unavailable on this WebView.');
-        notifyStatus('error', 'NO_WEBGL');
+        addLog('ERR', '[6] WebGL/WebGL2 context unavailable.');
+        setStage(6, 'fail', 'NO_WEBGL');
+        notifyStatus('error', 'STAGE_6|NO_WEBGL');
         return;
       }
 
-      // Threads logic: auto uses threads only when isolated & PSP; off forces false; on forces true if isolated
       let useThreads = false;
-      if (config.threadsMode === 'off') {
-        useThreads = false;
-      } else if (config.threadsMode === 'on') {
-        useThreads = isolated;
-      } else {
-        useThreads = isolated && isPsp;
-      }
+      if (config.threadsMode === 'off') useThreads = false;
+      else if (config.threadsMode === 'on') useThreads = isolated;
+      else useThreads = isolated && isPsp;
 
       if (isPsp && !isolated && config.threadsMode !== 'off') {
-        addLog('ERR', 'PSP core requires SharedArrayBuffer / crossOriginIsolated.');
-        notifyStatus('error', 'PSP_NO_SAB');
+        addLog('ERR', 'PSP يحتاج SharedArrayBuffer / crossOriginIsolated.');
+        setStage(6, 'fail', 'PSP_NO_SAB');
+        notifyStatus('error', 'PSP_NO_SAB|تفعيل Threads غير متاح في WebView');
         return;
       }
 
-      // 0.2 Prepare ROM URL: use Blob URL for ROMs <= 128MB for instant FS loading without Range issues
       let finalRomUrl = config.romUrl;
       if (!config.isAlreadyBlob && (!config.fileSizeBytes || config.fileSizeBytes <= 128 * 1024 * 1024)) {
         try {
-          addLog('INFO', 'Fetching ROM into local Blob URL...');
+          addLog('INFO', 'Converting ROM to Blob URL...');
           const resp = await fetch(config.romUrl);
           if (!resp.ok) throw new Error('HTTP ' + resp.status);
           const buf = await resp.arrayBuffer();
           const blob = new Blob([buf], { type: 'application/octet-stream' });
+          if (activeBlobUrl) { try { URL.revokeObjectURL(activeBlobUrl); } catch (_) {} }
           activeBlobUrl = URL.createObjectURL(blob);
           finalRomUrl = activeBlobUrl;
-          addLog('INFO', 'Blob URL created (' + buf.byteLength + ' bytes)');
+          addLog('INFO', 'ROM Blob ready (' + buf.byteLength + ' bytes)');
         } catch (err) {
-          addLog('WARN', 'Blob conversion failed, using direct URL: ' + err.message);
+          addLog('WARN', 'Blob fetch warning: ' + err.message);
           finalRomUrl = config.romUrl;
         }
       }
 
-      // Prepare BIOS URL (as Blob if present)
       let finalBiosUrl = config.biosUrl || '';
       if (finalBiosUrl && finalBiosUrl.startsWith('http')) {
         try {
           const bResp = await fetch(finalBiosUrl);
           if (bResp.ok) {
             const bBuf = await bResp.arrayBuffer();
+            if (activeBiosBlobUrl) { try { URL.revokeObjectURL(activeBiosBlobUrl); } catch (_) {} }
             activeBiosBlobUrl = URL.createObjectURL(new Blob([bBuf]));
             finalBiosUrl = activeBiosBlobUrl;
-            addLog('INFO', 'BIOS loaded into Blob (' + bBuf.byteLength + ' bytes)');
+            addLog('INFO', 'BIOS Blob ready (' + bBuf.byteLength + ' bytes)');
           }
         } catch (err) {
-          addLog('WARN', 'BIOS fetch fallback to URL: ' + err.message);
+          addLog('WARN', 'BIOS fetch fallback: ' + err.message);
         }
       }
 
       const pathtodata = resolveCdnBase(config);
-      addLog('INFO', 'Using EmulatorJS data path: ' + pathtodata + ', threads=' + useThreads);
+      currentCdnUsed = pathtodata;
+      addLog('INFO', 'CDN pathtodata=' + pathtodata + ', threads=' + useThreads);
 
-      // IMPORTANT: keep internal RetroArch shader disabled by default so WebView WebGL never black-screens
       const defaultOpts = {
+        'virtual-gamepad': 'disabled',
         'shader': 'disabled',
         'rewind-enabled': config.rewind ? 'enabled' : 'disabled',
         'vsync': config.vsync !== false ? 'enabled' : 'disabled',
@@ -638,16 +742,17 @@
       iframe.style.display = 'block';
       iframe.style.border = '0';
 
-      // Watchdog: 25 seconds to detect first rendered frame
       watchdogTimer = setTimeout(() => {
-        if (!frameStarted) {
-          const reason = !navigator.onLine ? 'NO_INTERNET' : 'TIMEOUT';
-          addLog('ERR', 'Watchdog triggered after 25s (' + reason + ')');
-          notifyStatus('error', reason);
-        }
+        if (thisBootId !== activeBootId || frameStarted) return;
+        const failedStage = firstUnpassedStage();
+        const reason = !navigator.onLine ? 'NO_INTERNET' : 'TIMEOUT';
+        addLog('ERR', 'انتهت المهلة عند المرحلة [' + failedStage + '] (' + reason + ')');
+        setStage(failedStage, 'fail', reason);
+        tryFallbackCdnOrFail(failedStage, 'انتهت مهلة 25 ثانية عند المرحلة [' + failedStage + ']');
       }, 25000);
 
       iframe.srcdoc = buildIframeSrcdoc({
+        bootId: thisBootId,
         core: core,
         romUrl: finalRomUrl,
         gameName: (config.title || 'RetroVerse').replace(/[\\/:*?"<>|]/g, '_'),
@@ -657,18 +762,31 @@
         cheats: config.cheatsList || [],
         defaultOptions: defaultOpts,
         volume: audioVol,
-        muted: audioMuted,
-        renderScalePercent: config.renderScalePercent || 100
+        muted: audioMuted
       });
 
       mount.innerHTML = '';
       mount.appendChild(iframe);
       activeFrame = iframe;
+
+      // [1] Measure iframe dimensions after mount
+      requestAnimationFrame(() => {
+        if (thisBootId !== activeBootId) return;
+        const rect = iframe.getBoundingClientRect();
+        const w = Math.round(rect.width);
+        const h = Math.round(rect.height);
+        const ok = w > 0 && h > 0;
+        addLog(ok ? 'INFO' : 'ERR', '[1] تم إنشاء iframe وحجمه: ' + w + '×' + h);
+        setStage(1, ok ? 'pass' : 'fail', w + '×' + h);
+        if (!ok) {
+          notifyStatus('error', 'STAGE_1|حاوية اللعب حجمها صفر (0×0)');
+        }
+      });
     },
 
     teardown: function() {
       stopHomebrew();
-      destroyActiveFrame();
+      destroyActiveFrame(true);
       mode = 'idle';
     },
 
@@ -678,7 +796,6 @@
   };
 
   window.RetroInput = {
-    // Direct EmulatorJS simulateInput(0, buttonIndex 0..23, value 0..1)
     simulate: function(buttonIndex, value) {
       if (mode === 'emulatorjs') {
         sendToFrame({ cmd: 'input', player: 0, index: buttonIndex, value: value });

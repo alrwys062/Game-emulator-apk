@@ -50,6 +50,7 @@ import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.material.icons.rounded.CameraAlt
 import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.FastRewind
 import androidx.compose.material.icons.rounded.Fullscreen
@@ -79,6 +80,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -110,6 +112,8 @@ import com.example.data.preferences.RetroSettings
 import com.example.model.RetroSystem
 import com.example.ui.components.CheatManagerDialog
 import com.example.ui.components.EjsButtonIndex
+import com.example.ui.components.EngineStageInfo
+import com.example.ui.components.EngineStagesChecklistCard
 import com.example.ui.components.PlayDiagnosticsOverlay
 import com.example.ui.components.TouchControllerDeck
 import com.example.ui.theme.BackgroundDark
@@ -145,8 +149,6 @@ private fun buildLocalFileResponse(
         "Access-Control-Allow-Methods" to "GET, HEAD, OPTIONS",
         "Access-Control-Allow-Headers" to "*",
         "Cross-Origin-Resource-Policy" to "cross-origin",
-        "Cross-Origin-Opener-Policy" to "same-origin",
-        "Cross-Origin-Embedder-Policy" to "credentialless",
         "Accept-Ranges" to "bytes",
         "Cache-Control" to "no-store"
     )
@@ -250,6 +252,16 @@ fun PlayScreen(
     var forceNoThreads by remember { mutableStateOf(false) }
     var pendingSaveSlot by remember { mutableIntStateOf(-1) }
     var pendingStatePayload by remember { mutableStateOf<String?>(null) }
+    val stageStates = remember {
+        mutableStateMapOf(
+            1 to EngineStageInfo(),
+            2 to EngineStageInfo(),
+            3 to EngineStageInfo(),
+            4 to EngineStageInfo(),
+            5 to EngineStageInfo(),
+            6 to EngineStageInfo()
+        )
+    }
 
     val resolvedCore = remember(game, settings.selectedCore) {
         if (settings.selectedCore == "auto") game.coreOverride else settings.selectedCore
@@ -327,6 +339,7 @@ fun PlayScreen(
         engineStatus = "loading"
         engineErrorDetail = ""
         diagnosticLogs = ""
+        for (i in 1..6) stageStates[i] = EngineStageInfo("pending", "")
 
         if (isEngineTestMode) {
             val effectiveCdn = cdnOverride ?: settings.cdnMode
@@ -562,6 +575,13 @@ fun PlayScreen(
                                 }
 
                                 @JavascriptInterface
+                                fun onStageUpdate(stage: Int, status: String, detail: String) {
+                                    post {
+                                        stageStates[stage] = EngineStageInfo(status = status, detail = detail)
+                                    }
+                                }
+
+                                @JavascriptInterface
                                 fun onStateExported(cbName: String, dataJson: String) {
                                     post {
                                         val slot = pendingSaveSlot.takeIf { it >= 0 } ?: 1
@@ -606,9 +626,7 @@ fun PlayScreen(
                                                 "Access-Control-Allow-Origin" to "*",
                                                 "Access-Control-Allow-Methods" to "GET, HEAD, OPTIONS",
                                                 "Access-Control-Allow-Headers" to "*",
-                                                "Cross-Origin-Resource-Policy" to "cross-origin",
-                                                "Cross-Origin-Opener-Policy" to "same-origin",
-                                                "Cross-Origin-Embedder-Policy" to "credentialless"
+                                                "Cross-Origin-Resource-Policy" to "cross-origin"
                                             ),
                                             ByteArrayInputStream(ByteArray(0))
                                         )
@@ -618,11 +636,7 @@ fun PlayScreen(
                                         val coiStream = runCatching { context.assets.open("coi-serviceworker.js") }.getOrElse { ByteArrayInputStream(ByteArray(0)) }
                                         return WebResourceResponse(
                                             "application/javascript", "UTF-8", 200, "OK",
-                                            mapOf(
-                                                "Cross-Origin-Opener-Policy" to "same-origin",
-                                                "Cross-Origin-Embedder-Policy" to "credentialless",
-                                                "Access-Control-Allow-Origin" to "*"
-                                            ),
+                                            mapOf("Access-Control-Allow-Origin" to "*"),
                                             coiStream
                                         )
                                     }
@@ -631,11 +645,7 @@ fun PlayScreen(
                                         val htmlStream = context.assets.open("emulator_host.html")
                                         return WebResourceResponse(
                                             "text/html", "UTF-8", 200, "OK",
-                                            mapOf(
-                                                "Cross-Origin-Opener-Policy" to "same-origin",
-                                                "Cross-Origin-Embedder-Policy" to "credentialless",
-                                                "Access-Control-Allow-Origin" to "*"
-                                            ),
+                                            mapOf("Access-Control-Allow-Origin" to "*"),
                                             htmlStream
                                         )
                                     }
@@ -666,7 +676,7 @@ fun PlayScreen(
                     }
                 )
 
-                // Loading Overlay
+                // Loading Overlay — completely unmounted as soon as engineStatus != "loading" (EJS_onGameStart)
                 if (engineStatus == "loading") {
                     Box(
                         modifier = Modifier
@@ -691,128 +701,125 @@ fun PlayScreen(
                             )
                         }
                     }
-                } else if (engineStatus == "error") {
-                    PlayDiagnosticsOverlay(
-                        errorDetail = engineErrorDetail,
-                        diagnosticLogs = diagnosticLogs,
-                        aiBusy = aiBusy,
-                        aiResult = aiDiagnosticResult,
-                        onRetry = { bootEngineInWebView(webViewRef) },
-                        onSwitchCdn = {
-                            val next = if (activeCdnOverride == null) {
-                                "https://cdn.jsdelivr.net/gh/EmulatorJS/EmulatorJS@latest/data/"
-                            } else {
-                                null
-                            }
-                            activeCdnOverride = next
-                            onUpdateCdnMode(if (next != null) "jsdelivr" else "official")
-                            bootEngineInWebView(webViewRef, cdnOverride = next)
-                        },
-                        onRunWithoutThreads = {
-                            forceNoThreads = true
-                            bootEngineInWebView(webViewRef, noThreads = true)
-                        },
-                        onCopyLog = {
-                            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                            cm?.setPrimaryClip(ClipData.newPlainText("RetroVerse Log", diagnosticLogs))
-                            onShowMessage(if (isArabic) "تم نسخ سجل الأخطاء" else "Error log copied")
-                        },
-                        onDiagnoseWithAi = {
-                            onAskAiDiagnosis(engineErrorDetail, diagnosticLogs)
-                        }
-                    )
                 }
+            }
+        }
 
-                // Collapsible Top HUD Bar
-                if (hudVisible) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                            HudIconBtn(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, strings.close, "play_back_button", ::exitWithOptionalAutoSave)
-                            HudIconBtn(if (isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause, strings.actionPause, "play_pause_btn") {
-                                isPaused = !isPaused
-                                webViewRef?.evaluateJavascript("window.RetroConfig && window.RetroConfig.togglePause();", null)
-                            }
-                            HudIconBtn(Icons.Rounded.Refresh, strings.actionReset, "play_reset_btn") {
-                                webViewRef?.evaluateJavascript("window.RetroConfig && window.RetroConfig.resetGame();", null)
-                            }
-                            HudIconBtn(Icons.Rounded.ScreenRotation, "Rotate", "play_rotate_btn") {
-                                val nextLock = when (settings.orientationLock) {
-                                    "auto" -> "landscape"
-                                    "landscape" -> "portrait"
-                                    else -> "auto"
-                                }
-                                onUpdateOrientationLock(nextLock)
-                                onShowMessage(nextLock.uppercase())
-                            }
-                            HudIconBtn(
-                                if (isFullscreen) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen,
-                                "Fullscreen",
-                                "play_fullscreen_btn"
-                            ) { isFullscreen = !isFullscreen }
-                        }
+        val quickLoadLatest: () -> Unit = {
+            val targetSlot = saveStates.firstOrNull { it.slotIndex == 1 } ?: saveStates.firstOrNull()
+            if (targetSlot != null) {
+                triggerLoadFromSlot(targetSlot)
+            } else {
+                onShowMessage(if (isArabic) "لا توجد حالة محفوظة للاستعادة" else "No saved state to load")
+            }
+        }
 
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                            if (settings.showFps) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(Color.Black.copy(alpha = 0.6f))
-                                        .border(1.dp, BorderGlass, RoundedCornerShape(10.dp))
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = "${sys.shortName} $currentFps FPS • ${String.format("%.1f", frameTimeMs)}ms",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontFamily = JetBrainsMonoFontFamily,
-                                            fontWeight = FontWeight.Bold
-                                        ),
-                                        color = SecondaryCyan
-                                    )
-                                }
-                            }
-                            HudIconBtn(Icons.Rounded.AspectRatio, settings.aspectRatio, "play_aspect_btn") {
-                                val list = listOf("Original", "4:3", "16:9", "Stretch", "Integer")
-                                val next = list[(list.indexOf(settings.aspectRatio) + 1) % list.size]
-                                onUpdateAspectRatio(next)
-                                onShowMessage(next)
-                            }
-                            HudIconBtn(Icons.Rounded.VisibilityOff, "Hide HUD", "play_hide_hud_btn") { hudVisible = false }
-                        }
+        val diagnosticsOverlayContent: @Composable () -> Unit = {
+            PlayDiagnosticsOverlay(
+                errorDetail = engineErrorDetail,
+                diagnosticLogs = diagnosticLogs,
+                stageStates = stageStates,
+                aiBusy = aiBusy,
+                aiResult = aiDiagnosticResult,
+                onRetry = { bootEngineInWebView(webViewRef) },
+                onSwitchCdn = {
+                    val next = if (activeCdnOverride == null) {
+                        "https://cdn.jsdelivr.net/gh/EmulatorJS/EmulatorJS@main/data/"
+                    } else {
+                        null
                     }
-                } else {
+                    activeCdnOverride = next
+                    onUpdateCdnMode(if (next != null) "jsdelivr" else "official")
+                    bootEngineInWebView(webViewRef, cdnOverride = next)
+                },
+                onRunWithoutThreads = {
+                    forceNoThreads = true
+                    bootEngineInWebView(webViewRef, noThreads = true)
+                },
+                onCopyLog = {
+                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                    cm?.setPrimaryClip(ClipData.newPlainText("RetroVerse Log", diagnosticLogs))
+                    onShowMessage(if (isArabic) "تم نسخ سجل الأخطاء" else "Error log copied")
+                },
+                onDiagnoseWithAi = {
+                    onAskAiDiagnosis(engineErrorDetail, diagnosticLogs)
+                }
+            )
+        }
+
+        val topHudBar: @Composable () -> Unit = {
+            if (hudVisible) {
+                PlayTopHudBar(
+                    statusText = if (settings.showFps) {
+                        "${sys.shortName} • $currentFps FPS • ${String.format(Locale.US, "%.1f", frameTimeMs)}ms"
+                    } else {
+                        "${sys.shortName} • ${game.title}"
+                    },
+                    isPaused = isPaused,
+                    isFullscreen = isFullscreen,
+                    onBack = ::exitWithOptionalAutoSave,
+                    onTogglePause = {
+                        isPaused = !isPaused
+                        webViewRef?.evaluateJavascript("window.RetroConfig && window.RetroConfig.togglePause();", null)
+                    },
+                    onReset = {
+                        webViewRef?.evaluateJavascript("window.RetroConfig && window.RetroConfig.resetGame();", null)
+                    },
+                    onRotate = {
+                        val nextLock = when (settings.orientationLock) {
+                            "auto" -> "landscape"
+                            "landscape" -> "portrait"
+                            else -> "auto"
+                        }
+                        onUpdateOrientationLock(nextLock)
+                        onShowMessage(nextLock.uppercase())
+                    },
+                    onToggleFullscreen = { isFullscreen = !isFullscreen }
+                )
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
                     Box(
                         modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(6.dp)
-                            .size(32.dp)
+                            .size(34.dp)
                             .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.4f))
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .border(1.dp, BorderGlass, CircleShape)
                             .clickable { hudVisible = true },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Rounded.Visibility, contentDescription = "Show HUD", tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
+                        Icon(
+                            imageVector = Icons.Rounded.Visibility,
+                            contentDescription = "Show HUD",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
                     }
                 }
             }
         }
 
         if (isLandscape) {
-            // Landscape: Full-height centered viewport with translucent controls overlaid on left/right edges
+            // Landscape: Top HUD bar docked cleanly at top, centered viewport, left/right touch pads
             Box(modifier = Modifier.fillMaxSize()) {
                 webViewContent(
                     Modifier
                         .fillMaxHeight()
                         .fillMaxWidth()
-                        .padding(horizontal = if (hideTouchDeck) 8.dp else 72.dp, vertical = 4.dp)
+                        .padding(
+                            top = if (hudVisible) 48.dp else 4.dp,
+                            bottom = 4.dp,
+                            start = if (hideTouchDeck) 8.dp else 72.dp,
+                            end = if (hideTouchDeck) 8.dp else 72.dp
+                        )
                         .align(Alignment.Center)
                 )
-                if (!hideTouchDeck) {
+
+                if (!hideTouchDeck && engineStatus != "error") {
                     TouchControllerDeck(
                         profile = sys.controllerProfile,
                         isLandscape = true,
@@ -821,9 +828,26 @@ fun PlayScreen(
                         onSimulateInput = ::sendButtonIndex,
                         onSavePlacement = { cid, pl -> onSaveControlPlacement(sys.controllerProfile.name, true, cid, pl) },
                         onOpenMenu = { drawerExpanded = !drawerExpanded },
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(top = if (hudVisible) 44.dp else 0.dp)
                     )
                 }
+
+                Box(modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()) {
+                    topHudBar()
+                }
+
+                if (engineStatus == "error") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(top = if (hudVisible) 46.dp else 0.dp)
+                    ) {
+                        diagnosticsOverlayContent()
+                    }
+                }
+
                 if (drawerExpanded) {
                     Box(
                         modifier = Modifier
@@ -838,6 +862,7 @@ fun PlayScreen(
                             speedMultiplier = speedMultiplier,
                             onToggleExpand = { drawerExpanded = false },
                             onQuickSave = { triggerSaveToSlot(1) },
+                            onQuickLoad = quickLoadLatest,
                             onRewind = {
                                 webViewRef?.evaluateJavascript("window.RetroConfig && window.RetroConfig.rewindStep();", null)
                                 onShowMessage(strings.rewindSuccessMsg)
@@ -863,45 +888,85 @@ fun PlayScreen(
                 }
             }
         } else {
-            // Portrait: Viewport on top, Touch Deck in middle, Quick Tools & Saves drawer at bottom
+            // Portrait: Dedicated 44dp Top Bar above viewport (never overlaps!) + Screen + Error/Test OR Touch Deck + Drawer
             Column(
                 modifier = Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                webViewContent(
-                    Modifier
-                        .widthIn(max = 680.dp)
-                        .fillMaxWidth()
-                        .height(255.dp)
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                )
+                topHudBar()
 
-                if (!hideTouchDeck) {
-                    TouchControllerDeck(
-                        profile = sys.controllerProfile,
-                        isLandscape = false,
-                        settings = settings,
-                        editMode = editLayoutMode,
-                        onSimulateInput = ::sendButtonIndex,
-                        onSavePlacement = { cid, pl -> onSaveControlPlacement(sys.controllerProfile.name, false, cid, pl) },
-                        onOpenMenu = { drawerExpanded = !drawerExpanded },
-                        modifier = Modifier
-                            .widthIn(max = 620.dp)
-                            .fillMaxWidth()
-                            .weight(1f)
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                        contentAlignment = Alignment.Center
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(
-                            text = if (isArabic) "يد التحكم متصلة: $connectedGamepadName" else "Controller active: $connectedGamepadName",
-                            color = SecondaryCyan,
-                            style = MaterialTheme.typography.bodyMedium
+                        webViewContent(
+                            Modifier
+                                .widthIn(max = 680.dp)
+                                .fillMaxWidth()
+                                .height(250.dp)
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
                         )
+
+                        if (isEngineTestMode && engineStatus != "error") {
+                            Column(
+                                modifier = Modifier
+                                    .widthIn(max = 620.dp)
+                                    .fillMaxWidth()
+                                    .weight(1f)
+                                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = if (isArabic) "فحص مراحل المحرك المباشر [1] – [6] (GBA Homebrew)" else "Live Engine Self-Test Stages [1] – [6] (GBA Homebrew)",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = SecondaryCyan
+                                )
+                                EngineStagesChecklistCard(
+                                    stageStates = stageStates,
+                                    isArabic = isArabic
+                                )
+                            }
+                        } else if (!hideTouchDeck) {
+                            TouchControllerDeck(
+                                profile = sys.controllerProfile,
+                                isLandscape = false,
+                                settings = settings,
+                                editMode = editLayoutMode,
+                                onSimulateInput = ::sendButtonIndex,
+                                onSavePlacement = { cid, pl -> onSaveControlPlacement(sys.controllerProfile.name, false, cid, pl) },
+                                onOpenMenu = { drawerExpanded = !drawerExpanded },
+                                modifier = Modifier
+                                    .widthIn(max = 620.dp)
+                                    .fillMaxWidth()
+                                    .weight(1f)
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = if (isArabic) "يد التحكم متصلة: $connectedGamepadName" else "Controller active: $connectedGamepadName",
+                                    color = SecondaryCyan,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+                    }
+
+                    // Full unobstructed Error Overlay above Portrait deck (keeps TopBar reachable!)
+                    if (engineStatus == "error") {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            diagnosticsOverlayContent()
+                        }
                     }
                 }
 
@@ -913,6 +978,7 @@ fun PlayScreen(
                     speedMultiplier = speedMultiplier,
                     onToggleExpand = { drawerExpanded = !drawerExpanded },
                     onQuickSave = { triggerSaveToSlot(1) },
+                    onQuickLoad = quickLoadLatest,
                     onRewind = {
                         webViewRef?.evaluateJavascript("window.RetroConfig && window.RetroConfig.rewindStep();", null)
                         onShowMessage(strings.rewindSuccessMsg)
@@ -1071,6 +1137,82 @@ fun PlayScreen(
 }
 
 @Composable
+private fun PlayTopHudBar(
+    statusText: String,
+    isPaused: Boolean,
+    isFullscreen: Boolean,
+    onBack: () -> Unit,
+    onTogglePause: () -> Unit,
+    onReset: () -> Unit,
+    onRotate: () -> Unit,
+    onToggleFullscreen: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(44.dp)
+            .background(Color(0xD90A0C12))
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        // Right in RTL: single-line status capsule (11sp, ellipsis, weight 1f)
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(12.dp))
+                .background(SurfaceElevated)
+                .border(1.dp, BorderGlass, RoundedCornerShape(12.dp))
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+        ) {
+            Text(
+                text = statusText,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontFamily = JetBrainsMonoFontFamily,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                ),
+                color = SecondaryCyan,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        // Left in RTL: Five non-overlapping 40dp circular buttons
+        HudIconBtn(
+            icon = if (isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
+            desc = "Pause",
+            tag = "play_pause_btn",
+            onClick = onTogglePause
+        )
+        HudIconBtn(
+            icon = Icons.Rounded.Refresh,
+            desc = "Reset",
+            tag = "play_reset_btn",
+            onClick = onReset
+        )
+        HudIconBtn(
+            icon = Icons.Rounded.ScreenRotation,
+            desc = "Rotate",
+            tag = "play_rotate_btn",
+            onClick = onRotate
+        )
+        HudIconBtn(
+            icon = if (isFullscreen) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen,
+            desc = "Fullscreen",
+            tag = "play_fullscreen_btn",
+            onClick = onToggleFullscreen
+        )
+        HudIconBtn(
+            icon = Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
+            desc = "Exit",
+            tag = "play_back_button",
+            onClick = onBack
+        )
+    }
+}
+
+@Composable
 private fun QuickToolsAndSavesDrawer(
     settings: RetroSettings,
     saveStates: List<SaveStateEntity>,
@@ -1079,6 +1221,7 @@ private fun QuickToolsAndSavesDrawer(
     speedMultiplier: Float,
     onToggleExpand: () -> Unit,
     onQuickSave: () -> Unit,
+    onQuickLoad: () -> Unit,
     onRewind: () -> Unit,
     onCycleSpeed: () -> Unit,
     onScreenshot: () -> Unit,
@@ -1123,8 +1266,9 @@ private fun QuickToolsAndSavesDrawer(
 
         Spacer(Modifier.height(6.dp))
 
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             QuickActionTile(Icons.Rounded.Save, strings.actionSave, false, Modifier.weight(1f), onQuickSave)
+            QuickActionTile(Icons.Rounded.Download, if (isArabic) "تحميل" else "Load", false, Modifier.weight(1f), onQuickLoad)
             QuickActionTile(Icons.Rounded.FastRewind, strings.actionRewind, false, Modifier.weight(1f), onRewind)
             QuickActionTile(Icons.Rounded.FastForward, "${speedMultiplier}x", speedMultiplier != 1f, Modifier.weight(1f), onCycleSpeed)
             QuickActionTile(Icons.Rounded.CameraAlt, strings.actionScreenshot, false, Modifier.weight(1f), onScreenshot)
@@ -1175,13 +1319,13 @@ private fun HudIconBtn(
     IconButton(
         onClick = onClick,
         modifier = Modifier
-            .size(34.dp)
+            .size(40.dp)
             .testTag(tag)
             .clip(CircleShape)
-            .background(Color.Black.copy(alpha = 0.6f))
+            .background(SurfaceElevated)
             .border(1.dp, BorderGlass, CircleShape)
     ) {
-        Icon(imageVector = icon, contentDescription = desc, tint = Color.White, modifier = Modifier.size(17.dp))
+        Icon(imageVector = icon, contentDescription = desc, tint = Color.White, modifier = Modifier.size(18.dp))
     }
 }
 

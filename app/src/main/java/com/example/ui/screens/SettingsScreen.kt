@@ -241,7 +241,7 @@ fun SettingsScreen(
                     icon = Icons.Rounded.PlayCircleOutline,
                     iconBg = SuccessGreen,
                     title = strings.engineTestBtn,
-                    valueLabel = "NES",
+                    valueLabel = "GBA",
                     testTag = "settings_engine_test",
                     onClick = onRunEngineTest
                 )
