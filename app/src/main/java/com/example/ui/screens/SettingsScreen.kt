@@ -26,6 +26,8 @@ import androidx.compose.material.icons.rounded.Backup
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.CleaningServices
+import androidx.compose.material.icons.rounded.CloudDone
+import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.ColorLens
 import androidx.compose.material.icons.rounded.DeveloperBoard
@@ -83,6 +85,9 @@ import com.example.data.preferences.RetroSettings
 import com.example.model.RetroSystem
 import com.example.service.AiPerfRecommendation
 import com.example.service.DeviceSpecSummary
+import com.example.service.OfflineCoreBundleState
+import com.example.service.OfflineDiagnosticsReport
+import com.example.service.OfflinePrepProgress
 import com.example.service.RomBundler
 import com.example.ui.theme.AccentPreset
 import com.example.ui.theme.BorderSubtle
@@ -101,8 +106,13 @@ import com.example.viewmodel.AiChatMessage
 @Composable
 fun SettingsScreen(
     settings: RetroSettings,
+    isOnline: Boolean,
     deviceSpec: DeviceSpecSummary,
     connectedGamepadName: String?,
+    connectedGamepadNames: List<String>,
+    offlineBundles: List<OfflineCoreBundleState>,
+    offlinePrepProgress: OfflinePrepProgress?,
+    offlineDiagnostics: OfflineDiagnosticsReport?,
     storageUsedBytes: Long,
     lastDiagnosticLogs: String,
     aiBusy: Boolean,
@@ -110,6 +120,12 @@ fun SettingsScreen(
     aiChatMessages: List<AiChatMessage>,
     onRefreshGamepads: () -> Unit,
     onRefreshStorage: () -> Unit,
+    onPrepareSystemOffline: (RetroSystem) -> Unit,
+    onPrepareAllSystemsOffline: () -> Unit,
+    onCancelOfflinePrep: () -> Unit,
+    onDeleteOfflineBundle: (String) -> Unit,
+    onClearAllOfflineBundles: () -> Unit,
+    onTriggerOfflineDiagnostics: () -> Unit,
     onPickBiosFile: (slotKey: String) -> Unit,
     onDownloadBiosUrl: (slotKey: String, url: String) -> Unit,
     onRemoveBios: (slotKey: String) -> Unit,
@@ -146,6 +162,8 @@ fun SettingsScreen(
     onUpdateGamepadDeadzone: (Float) -> Unit,
     onSaveKeyBinding: (playerIndex: Int, actionId: String, keyCode: Int) -> Unit,
     onResetKeyBindings: (playerIndex: Int) -> Unit,
+    onSaveGamepadProfileBinding: (gamepadId: String, actionId: String, keyCode: Int) -> Unit,
+    onResetGamepadProfileBindings: (gamepadId: String) -> Unit,
     onUpdateAutoSaveOnExit: (Boolean) -> Unit,
     onUpdateCheatsEnabled: (Boolean) -> Unit,
     onUpdateCheatCodes: (String) -> Unit,
@@ -167,6 +185,8 @@ fun SettingsScreen(
     val strings = LocalAppStrings.current
     val isArabic = LocalIsArabic.current
 
+    var showOfflineBundlesDialog by remember { mutableStateOf(false) }
+    var showOfflineDiagDialog by remember { mutableStateOf(false) }
     var showBiosDialog by remember { mutableStateOf(false) }
     var showPerfDialog by remember { mutableStateOf(false) }
     var showGamepadDialog by remember { mutableStateOf(false) }
@@ -216,10 +236,32 @@ fun SettingsScreen(
             }
         }
 
-        // Section 0: BIOS, Performance Engine & Gemini AI Hubs
+        // Section 0: Offline Bundles, BIOS, Performance Engine & Gemini AI Hubs
         item {
+            val readyBundlesCount = offlineBundles.count { it.isReady }
             SettingsGroupHeader(strings.sectionBios)
             SettingsGroupCard {
+                SettingsCycleRow(
+                    icon = if (isOnline) Icons.Rounded.CloudDone else Icons.Rounded.CloudOff,
+                    iconBg = if (readyBundlesCount > 0) SuccessGreen else WarningAmber,
+                    title = if (isArabic) "الحزمة الأوفلاين" else "Offline Bundles",
+                    valueLabel = "$readyBundlesCount / ${offlineBundles.size}",
+                    testTag = "settings_offline_bundles",
+                    onClick = { showOfflineBundlesDialog = true }
+                )
+                SettingsDivider()
+                SettingsCycleRow(
+                    icon = Icons.Rounded.BugReport,
+                    iconBg = SecondaryCyan,
+                    title = if (isArabic) "تشخيص الأوفلاين والأداء" else "Offline Diagnostics",
+                    valueLabel = if (isOnline) "Online" else "Offline",
+                    testTag = "settings_offline_diagnostics",
+                    onClick = {
+                        onTriggerOfflineDiagnostics()
+                        showOfflineDiagDialog = true
+                    }
+                )
+                SettingsDivider()
                 SettingsCycleRow(
                     icon = Icons.Rounded.DeveloperBoard,
                     iconBg = PrimaryPurple,
@@ -251,7 +293,9 @@ fun SettingsScreen(
                     icon = Icons.Rounded.AutoAwesome,
                     iconBg = Color(0xFFEC4899),
                     title = strings.aiAssistantTitle,
-                    valueLabel = if (settings.geminiApiKey.isNotBlank()) settings.geminiModel else (if (isArabic) "غير مُعد" else "Setup"),
+                    valueLabel = if (!isOnline) {
+                        if (isArabic) "تحتاج إنترنت" else "Offline"
+                    } else if (settings.geminiApiKey.isNotBlank()) settings.geminiModel else (if (isArabic) "غير مُعد" else "Setup"),
                     testTag = "settings_gemini_hub",
                     onClick = { showGeminiDialog = true }
                 )
@@ -625,6 +669,28 @@ fun SettingsScreen(
         }
     }
 
+    if (showOfflineBundlesDialog) {
+        OfflineBundlesDialog(
+            isOnline = isOnline,
+            bundles = offlineBundles,
+            prepProgress = offlinePrepProgress,
+            onDismiss = { showOfflineBundlesDialog = false },
+            onPrepareSystem = onPrepareSystemOffline,
+            onPrepareAll = onPrepareAllSystemsOffline,
+            onCancelPrep = onCancelOfflinePrep,
+            onDeleteBundle = onDeleteOfflineBundle
+        )
+    }
+
+    if (showOfflineDiagDialog) {
+        OfflineDiagnosticsDialog(
+            report = offlineDiagnostics,
+            onRefresh = onTriggerOfflineDiagnostics,
+            onClearOfflineCache = onClearAllOfflineBundles,
+            onDismiss = { showOfflineDiagDialog = false }
+        )
+    }
+
     if (showBiosDialog) {
         BiosManagerDialog(
             settings = settings,
@@ -659,11 +725,14 @@ fun SettingsScreen(
         GamepadMappingDialog(
             settings = settings,
             connectedGamepadName = connectedGamepadName,
+            connectedGamepadNames = connectedGamepadNames,
             onDismiss = { showGamepadDialog = false },
             onUpdateAutoHideTouch = onUpdateAutoHideTouch,
             onUpdateDeadzone = onUpdateGamepadDeadzone,
             onSaveKeyBinding = onSaveKeyBinding,
-            onResetKeyBindings = onResetKeyBindings
+            onResetKeyBindings = onResetKeyBindings,
+            onSaveGamepadProfileBinding = onSaveGamepadProfileBinding,
+            onResetGamepadProfileBindings = onResetGamepadProfileBindings
         )
     }
 

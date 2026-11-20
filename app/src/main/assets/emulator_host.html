@@ -83,7 +83,6 @@
     background: #07080D;
     display: none;
   }
-  /* Visual CRT / Scanlines / LCD overlays handled cleanly in CSS */
   #scanlines-overlay {
     pointer-events: none;
     position: absolute;
@@ -142,16 +141,20 @@
 (function() {
   const CDN_PRIMARY = 'https://cdn.emulatorjs.org/stable/data/';
   const CDN_FALLBACK = 'https://cdn.jsdelivr.net/gh/EmulatorJS/EmulatorJS@main/data/';
+  const LOCAL_DATA = './ejs/data/';
+  const EJS_CACHE = 'ejs-v1';
 
   let mode = 'idle'; // 'emulatorjs' | 'homebrew'
   let activeFrame = null;
+  let prepFrame = null;
+  let prepBlobUrl = null;
   let activeBlobUrl = null;
   let activeBiosBlobUrl = null;
   let watchdogTimer = null;
   let countdownTimer = null;
   let fpsTimer = null;
   let resizeObserver = null;
-  let bootStartTime = 0;
+  let wakeLockSentinel = null;
   let lastConfig = null;
   let logs = [];
   let audioVol = 0.75;
@@ -165,16 +168,35 @@
   let currentCdnUsed = CDN_PRIMARY;
   let stageMap = { 1: 'pending', 2: 'pending', 3: 'pending', 4: 'pending', 5: 'pending', 6: 'pending' };
 
+  // Gamepad configuration & state
+  let gamepadDeadzone = 0.15;
+  let gamepadHaptics = true;
+  let webGamepadCount = 0;
+  let webGamepadNames = [];
+  const gpPrevBtn = {};
+  const gpPrevAxis = {};
+  let gpShortcutCooldown = 0;
+
   const hbKeys = {
     up: false, down: false, left: false, right: false,
     a: false, b: false, x: false, y: false,
     l1: false, r1: false, start: false, select: false
   };
 
+  // Register coi-serviceworker & persistent storage seamlessly
+  (function initServiceWorkerAndStorage() {
+    if ('storage' in navigator && typeof navigator.storage.persist === 'function') {
+      navigator.storage.persist().catch(() => {});
+    }
+    if ('serviceWorker' in navigator && window.isSecureContext) {
+      navigator.serviceWorker.register('coi-serviceworker.js').catch(() => {});
+    }
+  })();
+
   function addLog(level, message) {
     const line = '[' + new Date().toISOString().substr(11, 8) + '][' + level + '] ' + String(message);
     logs.push(line);
-    if (logs.length > 280) logs.shift();
+    if (logs.length > 300) logs.shift();
     try {
       if (window.RetroHost && window.RetroHost.onDiagnosticLog) {
         window.RetroHost.onDiagnosticLog(level, line);
@@ -248,6 +270,64 @@
     }
   }
 
+  async function acquireWebWakeLock() {
+    try {
+      if ('wakeLock' in navigator && !wakeLockSentinel) {
+        wakeLockSentinel = await navigator.wakeLock.request('screen');
+        wakeLockSentinel.addEventListener('release', () => { wakeLockSentinel = null; });
+      }
+    } catch (_) {}
+  }
+
+  function releaseWebWakeLock() {
+    try {
+      if (wakeLockSentinel) {
+        wakeLockSentinel.release().catch(() => {});
+        wakeLockSentinel = null;
+      }
+    } catch (_) {}
+  }
+
+  // AudioContext resume helper on first user gesture
+  const trackedAudioContexts = [];
+  if (typeof window.AudioContext !== 'undefined' || typeof window.webkitAudioContext !== 'undefined') {
+    const OrigAC = window.AudioContext || window.webkitAudioContext;
+    if (OrigAC && !OrigAC.__rvWrapped) {
+      const WrappedAC = function() {
+        const ctx = new OrigAC(...arguments);
+        trackedAudioContexts.push(ctx);
+        return ctx;
+      };
+      WrappedAC.prototype = OrigAC.prototype;
+      WrappedAC.__rvWrapped = true;
+      window.AudioContext = WrappedAC;
+      if (window.webkitAudioContext) window.webkitAudioContext = WrappedAC;
+    }
+  }
+
+  function resumeAllAudio() {
+    trackedAudioContexts.forEach((ctx) => {
+      try { if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {}); } catch (_) {}
+    });
+    if (activeFrame && activeFrame.contentWindow) {
+      try { activeFrame.contentWindow.postMessage({ __rv_cmd: true, cmd: 'resume_audio' }, '*'); } catch (_) {}
+    }
+  }
+  window.addEventListener('pointerdown', resumeAllAudio, { passive: true });
+  window.addEventListener('keydown', resumeAllAudio, { passive: true });
+
+  // Pause safely on background visibilitychange & re-acquire wake lock on resume
+  document.addEventListener('visibilitychange', () => {
+    if (mode !== 'emulatorjs' || !frameStarted) return;
+    if (document.hidden) {
+      sendToFrame({ cmd: 'pause', paused: true });
+      releaseWebWakeLock();
+    } else {
+      if (!paused) sendToFrame({ cmd: 'pause', paused: false });
+      acquireWebWakeLock();
+    }
+  });
+
   function clearTimers() {
     if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null; }
     if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
@@ -256,6 +336,7 @@
 
   function destroyActiveFrame(revokeBlobs) {
     clearTimers();
+    releaseWebWakeLock();
     if (resizeObserver) {
       try { resizeObserver.disconnect(); } catch (_) {}
       resizeObserver = null;
@@ -290,7 +371,6 @@
     return { w: Math.round(r.width), h: Math.round(r.height) };
   }
 
-  // Wait via requestAnimationFrame up to 3 seconds for non-zero container bounds, falling back to manual pixel size
   function waitForNonZeroGameScreen(bootId) {
     return new Promise((resolve) => {
       const screen = document.getElementById('game-screen');
@@ -309,7 +389,6 @@
         if (performance.now() - startedWait < 3000) {
           requestAnimationFrame(step);
         } else {
-          // Force explicit pixel size from window.innerWidth / innerHeight if still collapsed
           const winW = Math.max(window.innerWidth || document.documentElement.clientWidth || 360, 320);
           const winH = Math.max(window.innerHeight || document.documentElement.clientHeight || 270, 240);
           const targetW = winW;
@@ -318,7 +397,7 @@
           screen.style.height = targetH + 'px';
           screen.style.display = 'block';
           screen.style.flex = 'none';
-          addLog('WARN', 'Applied explicit fallback pixel dimensions to #game-screen: ' + targetW + 'x' + targetH);
+          addLog('WARN', 'Applied fallback pixel dimensions to #game-screen: ' + targetW + 'x' + targetH);
           requestAnimationFrame(() => resolve(measureBox(screen)));
         }
       }
@@ -344,7 +423,6 @@
     let chk = 0;
     for (let i = 0xA0; i <= 0xBC; i++) chk = (chk - rom[i]) & 0xFF;
     rom[0xBD] = (chk - 0x19) & 0xFF;
-
     const prog = [
       0xE3A00301, 0xE3A01C04, 0xE3811003, 0xE1C010B0,
       0xE3A02406, 0xE3A04C96, 0xE3A05000,
@@ -357,7 +435,18 @@
     return rom;
   }
 
-  function resolveCdnBase(config) {
+  function createTinyDummyRomBytes(core) {
+    if (core === 'gba' || core === 'mgba' || core === 'vba_next') return createTestGbaRomBytes();
+    const bytes = new Uint8Array(1024);
+    if (core === 'nes' || core === 'fceumm' || core === 'nestopia') {
+      bytes[0] = 0x4E; bytes[1] = 0x45; bytes[2] = 0x53; bytes[3] = 0x1A; bytes[4] = 1; bytes[5] = 1;
+    } else if (core === 'n64' || core === 'mupen64plus_next' || core === 'parallel_n64') {
+      bytes[0] = 0x80; bytes[1] = 0x37; bytes[2] = 0x12; bytes[3] = 0x40;
+    }
+    return bytes;
+  }
+
+  async function resolveCdnBaseAsync(config) {
     if (config.cdnOverride && config.cdnOverride.length > 0) {
       return config.cdnOverride.endsWith('/') ? config.cdnOverride : config.cdnOverride + '/';
     }
@@ -365,6 +454,15 @@
       const p = config.customDataPath.trim();
       return p.endsWith('/') ? p : p + '/';
     }
+    // Layer 3: Check local bundled ./ejs/data/loader.js via HEAD first!
+    try {
+      const headRes = await fetch(LOCAL_DATA + 'loader.js', { method: 'HEAD', cache: 'no-store' });
+      if (headRes && headRes.ok) {
+        addLog('INFO', 'Using local embedded engine bundle: ' + LOCAL_DATA);
+        return new URL(LOCAL_DATA, window.location.href).href;
+      }
+    } catch (_) {}
+
     if (config.cdnMode === 'jsdelivr') {
       return CDN_FALLBACK;
     }
@@ -374,6 +472,7 @@
   function buildIframeSrcdoc(params) {
     const cfgJson = JSON.stringify({
       bootId: params.bootId,
+      isPrepMode: !!params.isPrepMode,
       core: params.core,
       romUrl: params.romUrl,
       gameName: params.gameName,
@@ -397,38 +496,82 @@
       '</style></head><body dir="ltr"><div id="game"></div>' +
       '<script>' +
       'var CFG=' + cfgJson + ';' +
+      'var EJS_CACHE_NAME="ejs-v1";' +
       'function postParent(type,payload){try{window.parent.postMessage({__rv:true,bootId:CFG.bootId,type:type,payload:payload},"*");}catch(_){}}' +
 
-      // [6] Runtime errors, unhandled rejections, console.error
+      // AudioContext resume on first touch/key inside iframe too
+      'var __rvACs=[];(function(){var AC=window.AudioContext||window.webkitAudioContext;if(AC&&!AC.__rv){var W=function(){var c=new AC(...arguments);__rvACs.push(c);return c;};W.prototype=AC.prototype;W.__rv=true;window.AudioContext=W;if(window.webkitAudioContext)window.webkitAudioContext=W;}})();' +
+      'function __rvResumeAudio(){__rvACs.forEach(function(c){try{if(c&&c.state==="suspended")c.resume();}catch(_){}});}' +
+      'window.addEventListener("pointerdown",__rvResumeAudio,{passive:true});' +
+
+      // [6] Runtime errors
       'window.onerror=function(msg,src,line){postParent("stage_6_err","window.onerror: "+msg+" @"+(src||"")+":"+line);};' +
       'window.addEventListener("unhandledrejection",function(e){var r=e&&e.reason;postParent("stage_6_err","unhandledrejection: "+(r&&r.message?r.message:String(r)));});' +
       'var origErr=console.error;console.error=function(){try{postParent("stage_6_err","console.error: "+Array.prototype.slice.call(arguments).join(" "));}catch(_){}return origErr.apply(console,arguments);};' +
 
-      // [4] Wrap fetch and XMLHttpRequest BEFORE loading loader.js
+      // Helper for Cache Storage fallback layer (Layer B)
+      'function isCdnUrl(u){return u&&(u.indexOf("https://cdn.emulatorjs.org/")===0||u.indexOf("https://cdn.jsdelivr.net/")===0);}' +
+      'function cacheOpen(){try{return ("caches" in window)?window.caches.open(EJS_CACHE_NAME):Promise.resolve(null);}catch(_){return Promise.resolve(null);}}' +
+      'function guessMime(u){var l=String(u||"").toLowerCase();if(l.indexOf(".js")>-1)return"application/javascript";if(l.indexOf(".css")>-1)return"text/css";if(l.indexOf(".wasm")>-1)return"application/wasm";if(l.indexOf(".json")>-1)return"application/json";return"application/octet-stream";}' +
+
+      // [4] Layer B Fallback Interceptor: wrap fetch, XHR, and <script>/<link> DOM insertions via Cache Storage (ejs-v1)
       '(function(){' +
       '  var origFetch=window.fetch;' +
       '  if(origFetch){' +
       '    window.fetch=function(input,init){' +
       '      var url=(typeof input==="string")?input:(input&&input.url?input.url:String(input));' +
       '      var isLocal=url.indexOf("blob:")===0||url.indexOf("data:")===0;' +
-      '      return origFetch.apply(this,arguments).then(function(res){' +
-      '        if(!isLocal)postParent("net_log",{ok:res.ok,url:url,status:res.status,via:"fetch"});' +
-      '        return res;' +
-      '      }).catch(function(err){' +
-      '        if(!isLocal)postParent("net_log",{ok:false,url:url,status:0,error:(err&&err.message?err.message:String(err)),via:"fetch"});' +
-      '        throw err;' +
+      '      if(isLocal||!isCdnUrl(url)){' +
+      '        return origFetch.apply(this,arguments).then(function(res){' +
+      '          if(!isLocal)postParent("net_log",{ok:res.ok,url:url,status:res.status,via:"fetch",bytes:Number(res.headers.get("Content-Length")||0)});' +
+      '          return res;' +
+      '        }).catch(function(err){' +
+      '          if(!isLocal)postParent("net_log",{ok:false,url:url,status:0,error:(err&&err.message?err.message:String(err)),via:"fetch"});' +
+      '          throw err;' +
+      '        });' +
+      '      }' +
+      '      return cacheOpen().then(function(cache){' +
+      '        if(!cache)return origFetch.apply(window,[url,{mode:"cors",credentials:"omit"}]);' +
+      '        return cache.match(url,{ignoreVary:true}).then(function(hit){' +
+      '          if(hit){' +
+      '            postParent("net_log",{ok:true,url:url,status:200,via:"cache",bytes:Number(hit.headers.get("Content-Length")||0)});' +
+      '            return hit.clone();' +
+      '          }' +
+      '          return origFetch.call(window,url,{mode:"cors",credentials:"omit"}).then(function(res){' +
+      '            postParent("net_log",{ok:res.ok,url:url,status:res.status,via:"fetch",bytes:Number(res.headers.get("Content-Length")||0)});' +
+      '            if(res&&res.ok&&res.type!=="opaque"){try{cache.put(url,res.clone());}catch(_){}}' +
+      '            return res;' +
+      '          }).catch(function(err){' +
+      '            postParent("net_log",{ok:false,url:url,status:0,error:(err&&err.message?err.message:String(err)),via:"fetch"});' +
+      '            throw err;' +
+      '          });' +
+      '        });' +
       '      });' +
       '    };' +
       '  }' +
+
       '  var origOpen=XMLHttpRequest.prototype.open;' +
       '  var origSend=XMLHttpRequest.prototype.send;' +
-      '  XMLHttpRequest.prototype.open=function(method,url){this.__rvUrl=String(url||"");return origOpen.apply(this,arguments);};' +
+      '  XMLHttpRequest.prototype.open=function(method,url){this.__rvMethod=String(method||"GET").toUpperCase();this.__rvUrl=String(url||"");return origOpen.apply(this,arguments);};' +
       '  XMLHttpRequest.prototype.send=function(){' +
       '    var xhr=this,u=xhr.__rvUrl||"";' +
       '    var isLocal=u.indexOf("blob:")===0||u.indexOf("data:")===0;' +
       '    if(!isLocal&&u){' +
       '      xhr.addEventListener("loadend",function(){' +
-      '        postParent("net_log",{ok:xhr.status>=200&&xhr.status<400,url:u,status:xhr.status,via:"XHR"});' +
+      '        var ok=xhr.status>=200&&xhr.status<400;' +
+      '        var size=0;try{if(xhr.response instanceof ArrayBuffer)size=xhr.response.byteLength;else if(typeof xhr.responseText==="string")size=xhr.responseText.length;}catch(_){}' +
+      '        postParent("net_log",{ok:ok,url:u,status:xhr.status,via:"XHR",bytes:size});' +
+      '        if(ok&&isCdnUrl(u)&&xhr.__rvMethod==="GET"){' +
+      '          cacheOpen().then(function(cache){' +
+      '            if(!cache)return;' +
+      '            try{' +
+      '              var body=null;' +
+      '              if(xhr.response instanceof ArrayBuffer)body=xhr.response;' +
+      '              else if(typeof xhr.responseText==="string")body=xhr.responseText;' +
+      '              if(body!==null)cache.put(u,new Response(body,{status:200,headers:{"Content-Type":guessMime(u)}}));' +
+      '            }catch(_){}' +
+      '          });' +
+      '        }' +
       '      });' +
       '      xhr.addEventListener("error",function(){' +
       '        postParent("net_log",{ok:false,url:u,status:xhr.status||0,error:"XHR network error",via:"XHR"});' +
@@ -436,6 +579,40 @@
       '    }' +
       '    return origSend.apply(this,arguments);' +
       '  };' +
+
+      // Intercept dynamic <script src> & <link href> added to DOM to serve from Cache Storage blob URLs if available
+      '  var origAppend=Node.prototype.appendChild;' +
+      '  var origInsert=Node.prototype.insertBefore;' +
+      '  function interceptDomTag(node){' +
+      '    try{' +
+      '      if(!node||node.nodeType!==1)return false;' +
+      '      var tag=node.tagName;' +
+      '      var url=(tag==="SCRIPT")?node.src:(tag==="LINK"?node.href:"");' +
+      '      if(!url||url.indexOf("blob:")===0||!isCdnUrl(url)||node.__rvCachedHandled)return false;' +
+      '      node.__rvCachedHandled=true;' +
+      '      cacheOpen().then(function(cache){' +
+      '        if(!cache)return null;' +
+      '        return cache.match(url,{ignoreVary:true}).then(function(hit){' +
+      '          if(hit){' +
+      '            return hit.blob().then(function(b){' +
+      '              var blobUrl=URL.createObjectURL(new Blob([b],{type:guessMime(url)}));' +
+      '              postParent("net_log",{ok:true,url:url,status:200,via:"dom-cache",bytes:b.size});' +
+      '              if(tag==="SCRIPT")node.src=blobUrl;else node.href=blobUrl;' +
+      '              origAppend.call(document.head||document.body,node);' +
+      '            });' +
+      '          }' +
+      '          return window.fetch(url).then(function(r){return r.blob();}).then(function(b){' +
+      '            var blobUrl=URL.createObjectURL(new Blob([b],{type:guessMime(url)}));' +
+      '            if(tag==="SCRIPT")node.src=blobUrl;else node.href=blobUrl;' +
+      '            origAppend.call(document.head||document.body,node);' +
+      '          }).catch(function(){origAppend.call(document.head||document.body,node);});' +
+      '        });' +
+      '      }).catch(function(){origAppend.call(document.head||document.body,node);});' +
+      '      return true;' +
+      '    }catch(_){return false;}' +
+      '  }' +
+      '  Node.prototype.appendChild=function(ch){if(interceptDomTag(ch))return ch;return origAppend.apply(this,arguments);};' +
+      '  Node.prototype.insertBefore=function(ch,ref){if(interceptDomTag(ch))return ch;return origInsert.apply(this,arguments);};' +
       '})();' +
 
       // Set EmulatorJS globals strictly in order before loader.js
@@ -454,10 +631,17 @@
       'window.EJS_HideSettings=true;' +
 
       'var startReported=false;' +
-      'window.EJS_ready=function(){postParent("stage_5_ready",CFG.core);};' +
+      'window.EJS_ready=function(){' +
+      '  postParent("stage_5_ready",CFG.core);' +
+      '  try{if(window.EJS_emulator&&typeof window.EJS_emulator.changeSettingOption==="function"&&(CFG.core==="psp"||CFG.core==="ppsspp")){' +
+      '    try{window.EJS_emulator.changeSettingOption("shader","disabled");}catch(_){}' +
+      '    try{window.EJS_emulator.changeSettingOption("rewind-enabled","disabled");}catch(_){}' +
+      '  }}catch(_){}' +
+      '};' +
       'window.EJS_onGameStart=function(){' +
       '  if(!startReported){startReported=true;postParent("stage_5_start",{core:CFG.core,hasEmu:!!window.EJS_emulator});}' +
       '  try{if(window.EJS_emulator&&typeof window.EJS_emulator.setVolume==="function"){window.EJS_emulator.setVolume(CFG.muted?0:CFG.volume);}}catch(_){}' +
+      '  try{window.focus();var c=document.querySelector("#game canvas");if(c){c.tabIndex=0;c.focus();}}catch(_){}' +
       '  setTimeout(function(){window.dispatchEvent(new Event("resize"));},100);' +
       '  setTimeout(function(){' +
       '    window.dispatchEvent(new Event("resize"));' +
@@ -466,12 +650,17 @@
       '  },450);' +
       '};' +
 
-      // Commands bridge
+      // Prevent HID controller / arrow keys from scrolling inner page + focus support
+      'window.addEventListener("keydown",function(e){if([32,37,38,39,40].indexOf(e.keyCode)>-1){e.preventDefault();}},{passive:false});' +
+
+      // Commands bridge (up to 4 players)
       'window.addEventListener("message",function(ev){' +
       '  var d=ev.data;if(!d||!d.__rv_cmd)return;' +
       '  var emu=window.EJS_emulator;var gm=emu&&emu.gameManager;' +
       '  try{' +
       '    if(d.cmd==="input"&&gm){gm.simulateInput(d.player||0,d.index,d.value);}' +
+      '    else if(d.cmd==="resume_audio"){__rvResumeAudio();}' +
+      '    else if(d.cmd==="focus"){window.focus();var c=document.querySelector("#game canvas");if(c){c.tabIndex=0;c.focus();}}' +
       '    else if(d.cmd==="pause"&&emu){if(d.paused&&emu.pause)emu.pause(true);else if(!d.paused&&emu.play)emu.play();}' +
       '    else if(d.cmd==="restart"&&gm){gm.restart();}' +
       '    else if(d.cmd==="volume"&&emu&&typeof emu.setVolume==="function"){emu.setVolume(d.volume);}' +
@@ -528,7 +717,8 @@
 
   function tryFallbackCdnOrFail(failedStageNum, failReason) {
     if (frameStarted) return;
-    if (!autoRetriedFallback && currentCdnUsed !== CDN_FALLBACK && lastConfig) {
+    const isOnlineNow = navigator.onLine !== false;
+    if (isOnlineNow && !autoRetriedFallback && currentCdnUsed !== CDN_FALLBACK && lastConfig) {
       autoRetriedFallback = true;
       addLog('WARN', '[AUTO-FALLBACK] Stage [' + failedStageNum + '] failed (' + failReason + '). Retrying once with ' + CDN_FALLBACK);
       const retryCfg = Object.assign({}, lastConfig, { cdnOverride: CDN_FALLBACK, __isFallbackRetry: true });
@@ -536,12 +726,101 @@
       return;
     }
     clearTimers();
-    notifyStatus('error', 'STAGE_' + failedStageNum + '|' + failReason);
+    const coreLow = ((lastConfig && lastConfig.core) || '').toLowerCase();
+    const isolated = !!window.crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined';
+    let finalDetail = 'STAGE_' + failedStageNum + '|' + failReason;
+    if (coreLow === 'psp' || coreLow === 'ppsspp') {
+      if (!isolated) finalDetail = 'PSP_NO_SAB|نواة PSP تتطلب crossOriginIsolated وSharedArrayBuffer';
+      else if (!isOnlineNow) finalDetail = 'OFFLINE_NOT_PREPARED|نواة PSP غير مجهزة للعمل أوفلاين — جهّزها بالإنترنت من الإعدادات';
+    } else if (!isOnlineNow) {
+      finalDetail = 'OFFLINE_NOT_PREPARED|هذا النظام يحتاج تجهيزاً مرة واحدة بالإنترنت من الحزمة الأوفلاين';
+    }
+    notifyStatus('error', finalDetail);
+  }
+
+  // Track hidden offline bundle pre-warming state
+  let activePrepSession = null;
+
+  function finishPrepSession(ok, errMsg) {
+    const sess = activePrepSession;
+    if (!sess) return;
+    activePrepSession = null;
+    if (sess.timer) clearTimeout(sess.timer);
+    if (sess.idleTimer) clearTimeout(sess.idleTimer);
+    if (prepFrame) {
+      try { prepFrame.srcdoc = ''; } catch (_) {}
+      try { prepFrame.remove(); } catch (_) {}
+      prepFrame = null;
+    }
+    if (prepBlobUrl) {
+      try { URL.revokeObjectURL(prepBlobUrl); } catch (_) {}
+      prepBlobUrl = null;
+    }
+    try {
+      if (window.RetroHost && window.RetroHost.onOfflinePrepareProgress) {
+        window.RetroHost.onOfflinePrepareProgress(
+          sess.systemId,
+          sess.core,
+          sess.threads,
+          ok ? 100 : 0,
+          sess.totalBytes,
+          sess.urls.length,
+          JSON.stringify(sess.urls),
+          true,
+          ok ? '' : (errMsg || 'Download timeout or network error')
+        );
+      }
+    } catch (_) {}
   }
 
   window.addEventListener('message', function(ev) {
     const d = ev.data;
     if (!d || !d.__rv) return;
+
+    // Route hidden offline-prep iframe messages cleanly
+    if (activePrepSession && d.bootId === activePrepSession.bootId) {
+      const s = activePrepSession;
+      if (d.type === 'net_log') {
+        const n = d.payload || {};
+        if (n.ok && n.url && n.url.indexOf('blob:') !== 0) {
+          if (s.urls.indexOf(n.url) === -1) {
+            s.urls.push(n.url);
+            s.totalBytes += (n.bytes || 0);
+          }
+          const uLow = n.url.toLowerCase();
+          if (uLow.includes('loader.js')) s.hasLoader = true;
+          if (uLow.includes('emulator.min.js') || uLow.includes('emulator.js')) s.hasEmuJs = true;
+          if (uLow.includes('/cores/') && !uLow.includes('/reports/')) s.hasCoreData = true;
+          const pct = Math.min(
+            95,
+            (s.hasLoader ? 20 : 5) + (s.hasEmuJs ? 25 : 0) + (s.hasCoreData ? 40 : 0) + Math.min(10, s.urls.length * 2)
+          );
+          try {
+            if (window.RetroHost && window.RetroHost.onOfflinePrepareProgress) {
+              window.RetroHost.onOfflinePrepareProgress(
+                s.systemId, s.core, s.threads, pct, s.totalBytes, s.urls.length, '[]', false, ''
+              );
+            }
+          } catch (_) {}
+          if (s.hasCoreData && s.hasEmuJs) {
+            if (s.idleTimer) clearTimeout(s.idleTimer);
+            s.idleTimer = setTimeout(() => finishPrepSession(true, ''), 1800);
+          }
+        } else if (!n.ok && isCriticalAssetUrl(n.url)) {
+          finishPrepSession(false, 'HTTP ' + (n.status || n.error) + ': ' + n.url);
+        }
+      } else if (d.type === 'stage_2' && d.payload && !d.payload.ok) {
+        finishPrepSession(false, 'Failed loader.js');
+      } else if (d.type === 'stage_5_ready' || d.type === 'stage_5_start' || d.type === 'stage_3') {
+        if (s.hasCoreData || (d.type === 'stage_5_start')) {
+          if (s.idleTimer) clearTimeout(s.idleTimer);
+          s.idleTimer = setTimeout(() => finishPrepSession(true, ''), 600);
+        }
+      }
+      // Note: any ROM-execution errors AFTER core downloaded are explicitly expected and ignored in prep mode!
+      return;
+    }
+
     if (d.bootId && d.bootId !== activeBootId) return;
 
     if (d.type === 'stage_2') {
@@ -570,7 +849,6 @@
     } else if (d.type === 'net_log') {
       const n = d.payload || {};
       if (!n.ok && isOptionalAssetUrl(n.url)) {
-        // Optional files like localization/*.json, cores/reports/*.json, version.json -> WARN only, NEVER fail!
         addLog('WARN', '[4] (ملف اختياري) ' + n.url + ' -> HTTP ' + (n.status || n.error));
         return;
       }
@@ -578,9 +856,8 @@
       addLog(n.ok ? 'INFO' : (isCriticalAssetUrl(n.url) ? 'ERR' : 'WARN'), msg);
 
       if (n.ok) {
-        if (stageMap[4] !== 'fail') setStage(4, 'pass', 'HTTP ' + n.status);
+        if (stageMap[4] !== 'fail') setStage(4, 'pass', n.via === 'cache' || n.via === 'dom-cache' ? 'CACHE' : ('HTTP ' + n.status));
       } else if (isCriticalAssetUrl(n.url)) {
-        // Fatal core / emulator script failure -> retry fallback CDN once or fail cleanly
         setStage(4, 'fail', (n.status ? 'HTTP ' + n.status : n.error));
         if (n.url.toLowerCase().includes('/cores/')) {
           tryFallbackCdnOrFail(4, 'فشل تحميل ملف النواة (' + n.url + ')');
@@ -593,6 +870,7 @@
     } else if (d.type === 'stage_5_start') {
       frameStarted = true;
       clearTimers();
+      acquireWebWakeLock();
       const cBox = measureBox(document.getElementById('game-screen'));
       const fBox = measureBox(activeFrame);
       if (cBox.w > 100 && cBox.h > 100 && fBox.w > 100 && fBox.h > 100) {
@@ -604,6 +882,11 @@
       if (stageMap[6] !== 'fail') setStage(6, 'pass', 'OK');
       addLog('INFO', '[5] EJS_onGameStart تم التشغيل! الحاوية=' + cBox.w + '×' + cBox.h + ' iframe=' + fBox.w + '×' + fBox.h);
       notifyStatus('running', (lastConfig && lastConfig.core) || '');
+      try {
+        window.focus();
+        if (activeFrame) activeFrame.focus();
+      } catch (_) {}
+      sendToFrame({ cmd: 'focus' });
       fpsTimer = setInterval(() => {
         const fps = paused ? 0 : 60;
         if (window.RetroHost && window.RetroHost.onFpsUpdate) {
@@ -633,7 +916,147 @@
     }
   }
 
-  // Homebrew fallback canvas for built-in sample titles without a ROM file
+  // ===== Full Web Gamepad API Loop (up to 4 players, standard + hat axes[9] fallback, deadzone, rumble, shortcuts) =====
+  function syncWebGamepadsState() {
+    if (!navigator.getGamepads) return;
+    const raw = Array.from(navigator.getGamepads()).filter(Boolean);
+    webGamepadCount = raw.length;
+    webGamepadNames = raw.map((g) => g.id || 'Gamepad');
+    try {
+      if (window.RetroHost && window.RetroHost.onWebGamepadsChanged) {
+        window.RetroHost.onWebGamepadsChanged(webGamepadCount, JSON.stringify(webGamepadNames));
+      }
+    } catch (_) {}
+  }
+  window.addEventListener('gamepadconnected', syncWebGamepadsState);
+  window.addEventListener('gamepaddisconnected', syncWebGamepadsState);
+
+  const STD_BTN_MAP = {
+    0: 0, 1: 8, 2: 1, 3: 9,
+    4: 10, 5: 11, 6: 12, 7: 13,
+    8: 2, 9: 3, 10: 14, 11: 15,
+    12: 4, 13: 5, 14: 6, 15: 7
+  };
+
+  function emitPadInput(player, idx, val) {
+    if (mode === 'emulatorjs') {
+      sendToFrame({ cmd: 'input', player: player, index: idx, value: val });
+    } else if (mode === 'homebrew' && player === 0) {
+      window.RetroInput.simulate(idx, val);
+    }
+  }
+
+  function triggerRumble(gp, strength) {
+    if (!gamepadHaptics || !gp || !gp.vibrationActuator) return;
+    try {
+      if (typeof gp.vibrationActuator.playEffect === 'function') {
+        gp.vibrationActuator.playEffect('dual-rumble', {
+          startDelay: 0,
+          duration: 38,
+          weakMagnitude: strength || 0.25,
+          strongMagnitude: strength || 0.35
+        }).catch(() => {});
+      }
+    } catch (_) {}
+  }
+
+  (function gamepadPollLoop() {
+    if (navigator.getGamepads && mode !== 'idle') {
+      const pads = navigator.getGamepads();
+      let activeCount = 0;
+      for (let p = 0; p < Math.min(4, pads.length); p++) {
+        const gp = pads[p];
+        if (!gp) continue;
+        activeCount++;
+
+        // Shortcut: Select (8) + Start (9) toggles menu drawer
+        const selPressed = !!(gp.buttons[8] && gp.buttons[8].pressed);
+        const stPressed = !!(gp.buttons[9] && gp.buttons[9].pressed);
+        const now = performance.now();
+        if (selPressed && stPressed && now > gpShortcutCooldown) {
+          gpShortcutCooldown = now + 700;
+          try { window.RetroHost && window.RetroHost.onGamepadShortcut && window.RetroHost.onGamepadShortcut('menu'); } catch (_) {}
+        }
+
+        // Standard & custom buttons
+        for (let b = 0; b < gp.buttons.length; b++) {
+          const ejsIdx = STD_BTN_MAP[b];
+          if (ejsIdx === undefined) continue;
+          const btn = gp.buttons[b];
+          const val = (typeof btn.value === 'number' && (b === 6 || b === 7)) ? (btn.value > 0.15 ? btn.value : 0) : (btn.pressed ? 1 : 0);
+          const k = p + '_' + b;
+          if (gpPrevBtn[k] !== val) {
+            gpPrevBtn[k] = val;
+            emitPadInput(p, ejsIdx, val);
+            if (val > 0 && (b === 0 || b === 1 || b === 2 || b === 3)) {
+              triggerRumble(gp, 0.2);
+            }
+          }
+        }
+
+        // Fallback Hat Switch on axes[9] for non-standard Bluetooth gamepads
+        if (gp.axes && gp.axes.length > 9 && (!gp.buttons[12] || gp.mapping !== 'standard')) {
+          const hat = gp.axes[9];
+          const up = (hat >= -1.05 && hat <= -0.75) || (hat >= 0.75 && hat <= 1.05) ? 1 : 0;
+          const right = (hat >= -0.75 && hat <= -0.15) ? 1 : 0;
+          const down = (hat >= -0.15 && hat <= 0.35) ? 1 : 0;
+          const left = (hat >= 0.35 && hat <= 0.78) ? 1 : 0;
+          const hatVals = [[4, up], [5, down], [6, left], [7, right]];
+          hatVals.forEach(([idx, v]) => {
+            const k = p + '_hat_' + idx;
+            if (gpPrevBtn[k] !== v) {
+              gpPrevBtn[k] = v;
+              emitPadInput(p, idx, v);
+            }
+          });
+        }
+
+        // Dual Analog Sticks with configurable Deadzone
+        const dz = gamepadDeadzone;
+        [[0, 16], [2, 20]].forEach(([axBase, ejsBase]) => {
+          const rawX = (gp.axes && gp.axes[axBase]) || 0;
+          const rawY = (gp.axes && gp.axes[axBase + 1]) || 0;
+          const px = rawX > dz ? Math.round(rawX * 32767) : 0;
+          const nx = rawX < -dz ? Math.round(-rawX * 32767) : 0;
+          const py = rawY > dz ? Math.round(rawY * 32767) : 0;
+          const ny = rawY < -dz ? Math.round(-rawY * 32767) : 0;
+          const vals = [[ejsBase, px], [ejsBase + 1, nx], [ejsBase + 2, py], [ejsBase + 3, ny]];
+          vals.forEach(([idx, v]) => {
+            const k = p + '_ax_' + idx;
+            if (gpPrevAxis[k] !== v) {
+              gpPrevAxis[k] = v;
+              emitPadInput(p, idx, v);
+            }
+          });
+        });
+      }
+      if (activeCount !== webGamepadCount) syncWebGamepadsState();
+    }
+    requestAnimationFrame(gamepadPollLoop);
+  })();
+
+  // Keyboard HID default controls (Arrows + Z X A S Q E Enter Shift) + preventDefault
+  const HID_KEY_MAP = {
+    ArrowUp: 4, ArrowDown: 5, ArrowLeft: 6, ArrowRight: 7,
+    z: 0, Z: 0, x: 8, X: 8, a: 1, A: 1, s: 9, S: 9,
+    q: 10, Q: 10, e: 11, E: 11, Enter: 3, Shift: 2
+  };
+  window.addEventListener('keydown', (e) => {
+    const idx = HID_KEY_MAP[e.key];
+    if (idx !== undefined && mode !== 'idle') {
+      e.preventDefault();
+      window.RetroInput.simulate(idx, 1);
+    }
+  }, { passive: false });
+  window.addEventListener('keyup', (e) => {
+    const idx = HID_KEY_MAP[e.key];
+    if (idx !== undefined && mode !== 'idle') {
+      e.preventDefault();
+      window.RetroInput.simulate(idx, 0);
+    }
+  }, { passive: false });
+
+  // Homebrew fallback canvas
   const hbCanvas = document.getElementById('hbCanvas');
   const hbCtx = hbCanvas.getContext('2d');
   let hbAnim = null;
@@ -643,10 +1066,7 @@
   let hbRewind = [];
 
   function stopHomebrew() {
-    if (hbAnim) {
-      cancelAnimationFrame(hbAnim);
-      hbAnim = null;
-    }
+    if (hbAnim) { cancelAnimationFrame(hbAnim); hbAnim = null; }
     hbCanvas.style.display = 'none';
   }
 
@@ -728,6 +1148,67 @@
       });
     },
 
+    prepareOfflineBundle: async function(reqConfig) {
+      finishPrepSession(false, 'Superseded');
+      const core = reqConfig.core || 'gba';
+      const systemId = reqConfig.systemId || core;
+      const isolated = !!window.crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined';
+      const isPsp = (core === 'psp' || core === 'ppsspp');
+      let useThreads = false;
+      if (reqConfig.threadsMode === 'off') useThreads = false;
+      else if (reqConfig.threadsMode === 'on') useThreads = isolated;
+      else useThreads = isolated && isPsp;
+
+      const pathtodata = await resolveCdnBaseAsync({
+        cdnMode: reqConfig.cdnMode || 'official',
+        customDataPath: reqConfig.customDataPath || ''
+      });
+
+      const dummyBytes = createTinyDummyRomBytes(core);
+      prepBlobUrl = URL.createObjectURL(new Blob([dummyBytes], { type: 'application/octet-stream' }));
+      const bootId = ++activeBootId;
+
+      activePrepSession = {
+        bootId: bootId,
+        systemId: systemId,
+        core: core,
+        threads: useThreads,
+        urls: [],
+        totalBytes: 0,
+        hasLoader: false,
+        hasEmuJs: false,
+        hasCoreData: false,
+        idleTimer: null,
+        timer: setTimeout(() => {
+          if (activePrepSession && activePrepSession.hasLoader && activePrepSession.hasCoreData) {
+            finishPrepSession(true, '');
+          } else {
+            finishPrepSession(false, 'Timeout preparing offline bundle for ' + core);
+          }
+        }, isPsp ? 55000 : 35000)
+      };
+
+      const fr = document.createElement('iframe');
+      fr.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:120px;height:120px;opacity:0;pointer-events:none;border:0;';
+      fr.setAttribute('allow', 'cross-origin-isolated');
+      fr.srcdoc = buildIframeSrcdoc({
+        bootId: bootId,
+        isPrepMode: true,
+        core: core,
+        romUrl: prepBlobUrl,
+        gameName: 'offline_prep_' + core,
+        pathtodata: pathtodata,
+        biosUrl: '',
+        threads: useThreads,
+        cheats: [],
+        defaultOptions: { 'virtual-gamepad': 'disabled', 'shader': 'disabled', 'rewind-enabled': 'disabled' },
+        volume: 0,
+        muted: true
+      });
+      prepFrame = fr;
+      document.body.appendChild(fr);
+    },
+
     bootRom: async function(config) {
       stopHomebrew();
       const isFallbackRetry = !!config.__isFallbackRetry;
@@ -742,7 +1223,6 @@
       const thisBootId = activeBootId;
       mode = 'emulatorjs';
       lastConfig = config;
-      bootStartTime = performance.now();
       paused = false;
 
       const gameScreen = document.getElementById('game-screen');
@@ -750,19 +1230,19 @@
       gameScreen.style.flex = 'none';
 
       const core = config.core || 'gba';
-      const isHeavyCore = (core === 'psx' || core === 'pcsx_rearmed' || core === 'psp' || core === 'ppsspp' || core === 'n64');
+      const isPsp = (core === 'psp' || core === 'ppsspp');
+      const isHeavyCore = (core === 'psx' || core === 'pcsx_rearmed' || isPsp || core === 'n64');
       const watchdogMs = isHeavyCore ? 40000 : 25000;
       const watchdogTotalSec = Math.round(watchdogMs / 1000);
 
       notifyStatus('loading', core);
       notifyLoadingTick(0, watchdogTotalSec);
 
-      const online = navigator.onLine;
+      const online = navigator.onLine !== false;
       const webglOk = checkWebGL2();
       const isolated = !!window.crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined';
-      const isPsp = (core === 'psp' || core === 'ppsspp');
 
-      addLog('INFO', 'Boot core=' + core + ', online=' + online + ', webgl=' + webglOk + ', isolated=' + isolated + ', timeout=' + watchdogTotalSec + 's');
+      addLog('INFO', 'Boot core=' + core + ', online=' + online + ', webgl=' + webglOk + ', isolated=' + isolated + ', size=' + (config.fileSizeBytes || 0));
 
       if (!webglOk) {
         addLog('ERR', '[6] WebGL/WebGL2 غير متاح.');
@@ -777,20 +1257,20 @@
       else useThreads = isolated && isPsp;
 
       if (isPsp && !isolated && config.threadsMode !== 'off') {
-        addLog('ERR', 'PSP يحتاج SharedArrayBuffer / crossOriginIsolated.');
+        addLog('ERR', 'PSP يحتاج SharedArrayBuffer وcrossOriginIsolated (Threads).');
         setStage(6, 'fail', 'PSP_NO_SAB');
-        notifyStatus('error', 'PSP_NO_SAB|نواة PSP تتطلب Threads/SharedArrayBuffer');
+        notifyStatus('error', 'PSP_NO_SAB|نواة PSP تتطلب Threads/SharedArrayBuffer. تأكد من تفعيل الترويسات الأمنية (COOP/COEP) وتحديث Android System WebView.');
         return;
       }
 
-      // 1.ج Wait for #game-screen to have real width > 100 & height > 100 BEFORE creating iframe!
-      const containerBounds = await waitForNonZeroGameScreen(thisBootId);
+      await waitForNonZeroGameScreen(thisBootId);
       if (thisBootId !== activeBootId) return;
 
+      // Avoid double RAM usage: only load into JS Blob URL if ROM <= 64MB (large PSP ISOs stream directly via HTTP 206 Range!)
       let finalRomUrl = config.romUrl;
-      if (!config.isAlreadyBlob && (!config.fileSizeBytes || config.fileSizeBytes <= 128 * 1024 * 1024)) {
+      if (!config.isAlreadyBlob && (!config.fileSizeBytes || config.fileSizeBytes <= 64 * 1024 * 1024)) {
         try {
-          addLog('INFO', 'Loading ROM into Blob URL...');
+          addLog('INFO', 'Preparing ROM Blob URL...');
           const resp = await fetch(config.romUrl);
           if (!resp.ok) throw new Error('HTTP ' + resp.status);
           const buf = await resp.arrayBuffer();
@@ -800,9 +1280,11 @@
           finalRomUrl = activeBlobUrl;
           addLog('INFO', 'ROM Blob ready (' + buf.byteLength + ' bytes)');
         } catch (err) {
-          addLog('WARN', 'Blob conversion warning: ' + err.message);
+          addLog('WARN', 'Streaming ROM directly: ' + err.message);
           finalRomUrl = config.romUrl;
         }
+      } else if (!config.isAlreadyBlob) {
+        addLog('INFO', 'Streaming large ROM (>64MB) via Range requests to conserve RAM.');
       }
 
       let finalBiosUrl = config.biosUrl || '';
@@ -821,11 +1303,21 @@
         }
       }
 
-      const pathtodata = resolveCdnBase(config);
+      const pathtodata = await resolveCdnBaseAsync(config);
+      if (thisBootId !== activeBootId) return;
       currentCdnUsed = pathtodata;
-      addLog('INFO', 'CDN=' + pathtodata + ', threads=' + useThreads);
+      addLog('INFO', 'DataPath=' + pathtodata + ', threads=' + useThreads);
 
-      const defaultOpts = {
+      // Apply safe PSP default profile or user settings
+      const defaultOpts = isPsp ? {
+        'virtual-gamepad': 'disabled',
+        'shader': 'disabled',
+        'rewind-enabled': 'disabled',
+        'vsync': config.vsync !== false ? 'enabled' : 'disabled',
+        'frameskip': config.frameSkip > 0 ? String(config.frameSkip) : 'auto',
+        'psp_internal_resolution': '1x',
+        'save-state-location': 'browser'
+      } : {
         'virtual-gamepad': 'disabled',
         'shader': 'disabled',
         'rewind-enabled': config.rewind ? 'enabled' : 'disabled',
@@ -833,11 +1325,8 @@
         'ff-ratio': String(config.ffSpeed || 2) + '.0x',
         'save-state-location': 'browser'
       };
-      if (config.frameSkip && config.frameSkip > 0) {
+      if (!isPsp && config.frameSkip && config.frameSkip > 0) {
         defaultOpts['frameskip'] = String(config.frameSkip);
-      }
-      if (config.resolutionScale && config.resolutionScale > 1) {
-        defaultOpts['psp_internal_resolution'] = String(config.resolutionScale) + 'x';
       }
 
       const iframe = document.createElement('iframe');
@@ -860,7 +1349,7 @@
       watchdogTimer = setTimeout(() => {
         if (thisBootId !== activeBootId || frameStarted) return;
         const failedStage = firstUnpassedStage();
-        const reason = !navigator.onLine ? 'NO_INTERNET' : 'TIMEOUT_' + watchdogTotalSec + 'S';
+        const reason = navigator.onLine === false ? 'OFFLINE_NOT_CACHED' : 'TIMEOUT_' + watchdogTotalSec + 'S';
         addLog('ERR', 'انتهت المهلة (' + watchdogTotalSec + 'ث) عند المرحلة [' + failedStage + '] (' + reason + ')');
         setStage(failedStage, 'fail', reason);
         tryFallbackCdnOrFail(failedStage, 'انتهت مهلة ' + watchdogTotalSec + ' ثانية عند المرحلة [' + failedStage + ']');
@@ -868,6 +1357,7 @@
 
       iframe.srcdoc = buildIframeSrcdoc({
         bootId: thisBootId,
+        isPrepMode: false,
         core: core,
         romUrl: finalRomUrl,
         gameName: (config.title || 'RetroVerse').replace(/[\\/:*?"<>|]/g, '_'),
@@ -884,7 +1374,6 @@
       gameScreen.appendChild(iframe);
       activeFrame = iframe;
 
-      // Observe #game-screen resizing and propagate to iframe on orientation/layout changes
       if (typeof ResizeObserver !== 'undefined') {
         resizeObserver = new ResizeObserver(() => {
           if (activeFrame && activeFrame.contentWindow) {
@@ -894,7 +1383,6 @@
         resizeObserver.observe(gameScreen);
       }
 
-      // [1] Verify BOTH #game-screen and #ejs-frame are strictly > 100x100 px
       requestAnimationFrame(() => {
         if (thisBootId !== activeBootId) return;
         const cBox = measureBox(gameScreen);
@@ -922,7 +1410,66 @@
     }
   };
 
+  window.RetroOffline = {
+    collectDiagnosticsAsync: async function() {
+      let swStatus = 'not_supported';
+      if ('serviceWorker' in navigator) {
+        try {
+          const reg = await navigator.serviceWorker.getRegistration();
+          swStatus = navigator.serviceWorker.controller ? 'controlled' : (reg && reg.active ? 'active_uncontrolled' : (reg ? 'registered' : 'none'));
+        } catch (e) {
+          swStatus = 'error:' + e.message;
+        }
+      }
+      let storageUsage = 0, storageQuota = 0;
+      if ('storage' in navigator && typeof navigator.storage.estimate === 'function') {
+        try {
+          const est = await navigator.storage.estimate();
+          storageUsage = est.usage || 0;
+          storageQuota = est.quota || 0;
+        } catch (_) {}
+      }
+      let cacheEntries = 0;
+      try {
+        if ('caches' in window) {
+          const c = await caches.open(EJS_CACHE);
+          const ks = await c.keys();
+          cacheEntries = ks.length;
+        }
+      } catch (_) {}
+
+      const result = {
+        swStatus: swStatus,
+        isolated: !!window.crossOriginIsolated,
+        sharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
+        storageUsage: storageUsage,
+        storageQuota: storageQuota,
+        webCacheEntries: cacheEntries,
+        webGamepadCount: webGamepadCount,
+        webGamepadNames: webGamepadNames
+      };
+      try {
+        if (window.RetroHost && window.RetroHost.onOfflineDiagnosticsResult) {
+          window.RetroHost.onOfflineDiagnosticsResult(JSON.stringify(result));
+        }
+      } catch (_) {}
+      return result;
+    },
+    clearWebCache: async function() {
+      try {
+        if ('caches' in window) await caches.delete(EJS_CACHE);
+      } catch (_) {}
+    }
+  };
+
   window.RetroInput = {
+    simulateForPlayer: function(player, buttonIndex, value) {
+      if (mode === 'emulatorjs') {
+        sendToFrame({ cmd: 'input', player: player || 0, index: buttonIndex, value: value });
+      } else if (mode === 'homebrew' && (player || 0) === 0) {
+        window.RetroInput.simulate(buttonIndex, value);
+      }
+    },
     simulate: function(buttonIndex, value) {
       if (mode === 'emulatorjs') {
         sendToFrame({ cmd: 'input', player: 0, index: buttonIndex, value: value });
@@ -941,6 +1488,10 @@
   };
 
   window.RetroConfig = {
+    setGamepadOptions: function(deadzone, haptics) {
+      if (typeof deadzone === 'number') gamepadDeadzone = Math.max(0.03, Math.min(0.45, deadzone));
+      gamepadHaptics = !!haptics;
+    },
     applySettings: function(filter, scanlines, aspect, volume, muted, scalePercent) {
       audioVol = Math.max(0, Math.min(1, volume));
       audioMuted = !!muted;

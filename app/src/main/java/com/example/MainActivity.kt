@@ -1,9 +1,17 @@
 package com.example
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color as AndroidColor
 import android.hardware.input.InputManager
 import android.os.Bundle
+import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -11,30 +19,55 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.local.GameEntity
+import com.example.service.OfflineCoreManager
+import com.example.service.OfflinePrepRequest
 import com.example.ui.components.CheatManagerDialog
 import com.example.ui.components.GlassBottomNav
 import com.example.ui.components.MainTab
@@ -49,7 +82,9 @@ import com.example.ui.screens.StoreScreen
 import com.example.ui.theme.AccentPreset
 import com.example.ui.theme.AppThemeMode
 import com.example.ui.theme.RetroVerseTheme
+import com.example.ui.theme.WarningAmber
 import com.example.viewmodel.RetroViewModel
+import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -88,6 +123,13 @@ fun RetroVerseApp(viewModel: RetroViewModel) {
     val bulkCoverProgress by viewModel.bulkCoverProgress.collectAsStateWithLifecycle()
     val snackbarMessage by viewModel.snackbarMessage.collectAsStateWithLifecycle()
     val connectedGamepad by viewModel.connectedGamepadName.collectAsStateWithLifecycle()
+    val connectedGamepads by viewModel.connectedGamepadNames.collectAsStateWithLifecycle()
+    val isOnline by viewModel.isOnline.collectAsStateWithLifecycle()
+    val offlineBundles by viewModel.offlineBundles.collectAsStateWithLifecycle()
+    val offlinePrepProgress by viewModel.offlinePrepProgress.collectAsStateWithLifecycle()
+    val activePrepRequest by viewModel.activePrepRequest.collectAsStateWithLifecycle()
+    val offlineDiagnostics by viewModel.offlineDiagnostics.collectAsStateWithLifecycle()
+    val diagnosticsTriggerId by viewModel.diagnosticsTriggerId.collectAsStateWithLifecycle()
     val storageUsedBytes by viewModel.storageUsedBytes.collectAsStateWithLifecycle()
     val lastDiagnosticLogs by viewModel.lastDiagnosticLogs.collectAsStateWithLifecycle()
     val notifications by viewModel.notifications.collectAsStateWithLifecycle()
@@ -202,10 +244,13 @@ fun RetroVerseApp(viewModel: RetroViewModel) {
                     PlayScreen(
                         game = game,
                         isEngineTestMode = isEngineTestMode,
+                        isOnline = isOnline,
+                        offlineCoreManager = viewModel.offlineCoreManager,
                         settings = settings,
                         saveStates = activeSaveStates,
                         cheats = activeCheats,
                         connectedGamepadName = connectedGamepad,
+                        connectedGamepadNames = connectedGamepads,
                         aiBusy = aiBusy,
                         aiDiagnosticResult = aiDiagnosticResult,
                         onBack = viewModel::exitGame,
@@ -251,6 +296,15 @@ fun RetroVerseApp(viewModel: RetroViewModel) {
                         }
                     ) { _ ->
                         Box(modifier = Modifier.fillMaxSize()) {
+                            OfflinePrepWebViewHost(
+                                isOnline = isOnline,
+                                offlineCoreManager = viewModel.offlineCoreManager,
+                                activePrepRequest = activePrepRequest,
+                                diagnosticsTriggerId = diagnosticsTriggerId,
+                                onPrepProgress = viewModel::onOfflinePrepareProgress,
+                                onDiagnosticsResult = viewModel::onOfflineWebDiagnosticsResult
+                            )
+
                             Crossfade(
                                 targetState = activeTab,
                                 animationSpec = tween(220),
@@ -304,17 +358,24 @@ fun RetroVerseApp(viewModel: RetroViewModel) {
                                     )
 
                                     MainTab.STORE -> StoreScreen(
+                                        isOnline = isOnline,
                                         downloadTask = downloadTask,
                                         onOpenSource = { src ->
                                             viewModel.openStoreBrowser(src.title, src.url)
                                         },
-                                        onImportFromPhone = { romPickerLauncher.launch(arrayOf("*/*")) }
+                                        onImportFromPhone = { romPickerLauncher.launch(arrayOf("*/*")) },
+                                        onShowMessage = viewModel::showToast
                                     )
 
                                     MainTab.SETTINGS -> SettingsScreen(
                                         settings = settings,
+                                        isOnline = isOnline,
                                         deviceSpec = viewModel.deviceSpec,
                                         connectedGamepadName = connectedGamepad,
+                                        connectedGamepadNames = connectedGamepads,
+                                        offlineBundles = offlineBundles,
+                                        offlinePrepProgress = offlinePrepProgress,
+                                        offlineDiagnostics = offlineDiagnostics,
                                         storageUsedBytes = storageUsedBytes,
                                         lastDiagnosticLogs = lastDiagnosticLogs,
                                         aiBusy = aiBusy,
@@ -322,6 +383,12 @@ fun RetroVerseApp(viewModel: RetroViewModel) {
                                         aiChatMessages = aiChatMessages,
                                         onRefreshGamepads = viewModel::refreshConnectedGamepads,
                                         onRefreshStorage = viewModel::refreshStorageUsage,
+                                        onPrepareSystemOffline = viewModel::prepareSystemOffline,
+                                        onPrepareAllSystemsOffline = viewModel::prepareAllSystemsOffline,
+                                        onCancelOfflinePrep = viewModel::cancelOfflinePrep,
+                                        onDeleteOfflineBundle = viewModel::deleteOfflineBundle,
+                                        onClearAllOfflineBundles = viewModel::clearAllOfflineBundles,
+                                        onTriggerOfflineDiagnostics = viewModel::triggerOfflineDiagnostics,
                                         onPickBiosFile = { slot ->
                                             pendingBiosSlotKey = slot
                                             biosPickerLauncher.launch(arrayOf("*/*"))
@@ -366,6 +433,8 @@ fun RetroVerseApp(viewModel: RetroViewModel) {
                                         onUpdateGamepadDeadzone = viewModel::updateGamepadDeadzone,
                                         onSaveKeyBinding = viewModel::saveKeyBinding,
                                         onResetKeyBindings = viewModel::resetKeyBindings,
+                                        onSaveGamepadProfileBinding = viewModel::saveGamepadProfileBinding,
+                                        onResetGamepadProfileBindings = viewModel::resetGamepadProfileBindings,
                                         onUpdateAutoSaveOnExit = viewModel::updateAutoSaveOnExit,
                                         onUpdateCheatsEnabled = viewModel::updateCheatsEnabled,
                                         onUpdateCheatCodes = viewModel::updateCheatCodes,
@@ -389,6 +458,37 @@ fun RetroVerseApp(viewModel: RetroViewModel) {
                                         onReplayOnboarding = viewModel::replayOnboarding,
                                         onClearCache = viewModel::clearTempCache,
                                         onShowMessage = viewModel::showToast
+                                    )
+                                }
+                            }
+
+                            AnimatedVisibility(
+                                visible = !isOnline,
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .statusBarsPadding()
+                                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(WarningAmber.copy(alpha = 0.16f))
+                                        .border(1.dp, WarningAmber.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+                                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.CloudOff,
+                                        contentDescription = null,
+                                        tint = WarningAmber,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = if (isArabic) "وضع الأوفلاين — الأنظمة المجهّزة تعمل بلا إنترنت" else "Offline Mode — Prepared cores work offline",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = WarningAmber
                                     )
                                 }
                             }
@@ -420,3 +520,146 @@ fun RetroVerseApp(viewModel: RetroViewModel) {
         }
     }
 }
+
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun OfflinePrepWebViewHost(
+    isOnline: Boolean,
+    offlineCoreManager: OfflineCoreManager,
+    activePrepRequest: OfflinePrepRequest?,
+    diagnosticsTriggerId: Int,
+    onPrepProgress: (
+        systemId: String,
+        coreId: String,
+        threadsEnabled: Boolean,
+        percent: Int,
+        totalBytes: Long,
+        fileCount: Int,
+        urlsJson: String,
+        done: Boolean,
+        error: String
+    ) -> Unit,
+    onDiagnosticsResult: (String) -> Unit
+) {
+    var pageLoaded by remember { mutableStateOf(false) }
+    var hostWebView by remember { mutableStateOf<WebView?>(null) }
+    val currentOnline by rememberUpdatedState(isOnline)
+
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        AndroidView(
+            modifier = Modifier
+                .size(1.dp)
+                .alpha(0f),
+            factory = { ctx ->
+                WebView(ctx).apply {
+                    settings.apply {
+                        javaScriptEnabled = true
+                        domStorageEnabled = true
+                        allowFileAccess = false
+                        allowContentAccess = false
+                        mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                        cacheMode = WebSettings.LOAD_DEFAULT
+                    }
+                    addJavascriptInterface(
+                        object {
+                            @JavascriptInterface
+                            fun onOfflinePrepareProgress(
+                                systemId: String,
+                                coreId: String,
+                                threadsEnabled: Boolean,
+                                percent: Int,
+                                totalBytes: Long,
+                                fileCount: Int,
+                                urlsJson: String,
+                                done: Boolean,
+                                error: String
+                            ) {
+                                post {
+                                    onPrepProgress(
+                                        systemId,
+                                        coreId,
+                                        threadsEnabled,
+                                        percent,
+                                        totalBytes,
+                                        fileCount,
+                                        urlsJson,
+                                        done,
+                                        error
+                                    )
+                                }
+                            }
+
+                            @JavascriptInterface
+                            fun onOfflineDiagnosticsResult(jsonStr: String) {
+                                post { onDiagnosticsResult(jsonStr) }
+                            }
+
+                            @JavascriptInterface
+                            fun onStageUpdate(stageNum: Int, status: String, detail: String) {}
+
+                            @JavascriptInterface
+                            fun onDiagnosticLog(level: String, line: String) {}
+
+                            @JavascriptInterface
+                            fun onEngineStatus(status: String, detail: String) {}
+
+                            @JavascriptInterface
+                            fun onLoadingTick(elapsedSec: Int, totalSec: Int) {}
+
+                            @JavascriptInterface
+                            fun onFpsUpdate(fps: Int, frameMs: Float) {}
+
+                            @JavascriptInterface
+                            fun onWebGamepadsChanged(count: Int, namesJson: String) {}
+                        },
+                        "RetroHost"
+                    )
+                    webChromeClient = WebChromeClient()
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldInterceptRequest(
+                            view: WebView?,
+                            request: WebResourceRequest?
+                        ): WebResourceResponse? {
+                            val reqUrl = request?.url?.toString() ?: return null
+                            val method = request.method ?: "GET"
+                            return offlineCoreManager.interceptRetroLocalOrCdn(reqUrl, method, currentOnline)
+                        }
+
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            pageLoaded = true
+                        }
+                    }
+                    loadUrl("https://retroverse.local/emulator_host.html")
+                    hostWebView = this
+                }
+            },
+            onRelease = { wv ->
+                runCatching {
+                    wv.evaluateJavascript("window.RetroEngine && window.RetroEngine.teardown();", null)
+                    wv.destroy()
+                }
+            }
+        )
+    }
+
+    LaunchedEffect(pageLoaded, activePrepRequest?.requestSeq) {
+        val req = activePrepRequest ?: return@LaunchedEffect
+        val wv = hostWebView ?: return@LaunchedEffect
+        if (!pageLoaded) return@LaunchedEffect
+        val payload = JSONObject().apply {
+            put("systemId", req.systemId)
+            put("core", req.coreId)
+            put("cdnMode", req.cdnMode)
+            put("customDataPath", req.customDataPath)
+            put("threadsMode", req.threadsMode)
+        }.toString()
+        wv.evaluateJavascript("window.RetroEngine && window.RetroEngine.prepareOfflineBundle($payload);", null)
+    }
+
+    LaunchedEffect(pageLoaded, diagnosticsTriggerId) {
+        if (!pageLoaded || diagnosticsTriggerId <= 0) return@LaunchedEffect
+        val wv = hostWebView ?: return@LaunchedEffect
+        wv.evaluateJavascript("window.RetroOffline && window.RetroOffline.collectDiagnosticsAsync();", null)
+    }
+}
+

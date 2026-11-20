@@ -92,6 +92,7 @@ fun PlayDiagnosticsOverlay(
         "STAGE_5" -> if (isArabic) "فشل المرحلة [5]: لم يبدأ تشغيل النواة (EJS_onGameStart)" else "Stage [5] Failed: EJS_onGameStart timeout"
         "STAGE_6" -> if (isArabic) "فشل المرحلة [6]: خطأ برمجي / WebGL داخل المحرك" else "Stage [6] Failed: WebGL or JS Runtime error"
         "PSP_NO_SAB" -> strings.engineErrorNoSab
+        "OFFLINE_NOT_PREPARED" -> if (isArabic) "هذا النظام يحتاج تجهيزاً مرة واحدة بالإنترنت" else "This system requires a one-time online setup"
         else -> strings.engineErrorCdn
     }
 

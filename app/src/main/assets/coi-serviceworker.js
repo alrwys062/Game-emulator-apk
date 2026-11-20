@@ -1,66 +1,147 @@
-/* coi-serviceworker.js - Cross-Origin Isolation (COOP + COEP) Service Worker for RetroVerse */
+/* coi-serviceworker.js - Cross-Origin Isolation (COOP + COEP) & Offline Engine Cache SW for RetroVerse Android */
 (() => {
+  const SHELL_CACHE = 'rv-shell-v1';
+  const EJS_CACHE = 'ejs-v1';
   const DEFAULT_COEP = 'credentialless';
+  const SHELL_URLS = ['./emulator_host.html', './coi-serviceworker.js', './index.html', './'];
+
+  function withIsolationHeaders(response) {
+    if (!response || response.status === 0 || response.type === 'opaque') return response;
+    const h = new Headers(response.headers);
+    h.set('Cross-Origin-Opener-Policy', 'same-origin');
+    h.set('Cross-Origin-Embedder-Policy', DEFAULT_COEP);
+    if (!h.has('Cross-Origin-Resource-Policy')) {
+      h.set('Cross-Origin-Resource-Policy', 'cross-origin');
+    }
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: h
+    });
+  }
+
+  function isEjsCdnRequest(urlStr) {
+    try {
+      const u = new URL(urlStr);
+      return u.hostname === 'cdn.emulatorjs.org' || u.hostname === 'cdn.jsdelivr.net';
+    } catch (_) {
+      return false;
+    }
+  }
 
   if (typeof window === 'undefined') {
-    self.addEventListener('install', () => {
-      self.skipWaiting();
+    self.addEventListener('install', (event) => {
+      event.waitUntil(
+        caches.open(SHELL_CACHE).then(async (cache) => {
+          for (const path of SHELL_URLS) {
+            try {
+              const res = await fetch(new Request(path, { cache: 'reload' }));
+              if (res && res.ok) await cache.put(path, res);
+            } catch (_) {}
+          }
+        }).finally(() => self.skipWaiting())
+      );
     });
 
     self.addEventListener('activate', (event) => {
-      event.waitUntil(self.clients.claim());
+      event.waitUntil(
+        caches.keys().then((keys) =>
+          Promise.all(
+            keys
+              .filter((k) => k !== SHELL_CACHE && k !== EJS_CACHE)
+              .map((k) => caches.delete(k))
+          )
+        ).then(() => self.clients.claim())
+      );
     });
 
     self.addEventListener('message', (event) => {
-      if (event.data && event.data.type === 'deregister') {
+      const data = event.data || {};
+      if (data.type === 'deregister') {
         self.registration
           .unregister()
           .then(() => self.clients.matchAll())
-          .then((clients) => {
-            clients.forEach((client) => client.navigate(client.url));
-          });
+          .then((clients) => clients.forEach((c) => c.navigate(c.url)));
+      } else if (data.type === 'SKIP_WAITING') {
+        self.skipWaiting();
+      } else if (data.type === 'CLEAR_EJS_CACHE') {
+        caches.delete(EJS_CACHE);
       }
     });
 
     self.addEventListener('fetch', (event) => {
       const request = event.request;
-      if (request.cache === 'only-if-cached' && request.mode !== 'same-origin') {
+      if (request.method !== 'GET' && request.method !== 'HEAD') return;
+      if (request.cache === 'only-if-cached' && request.mode !== 'same-origin') return;
+
+      if (isEjsCdnRequest(request.url)) {
+        event.respondWith(
+          caches.open(EJS_CACHE).then(async (cache) => {
+            const cached = await cache.match(request, { ignoreVary: true });
+            if (cached) {
+              return withIsolationHeaders(cached);
+            }
+            const corsReq = new Request(request.url, {
+              method: request.method,
+              mode: 'cors',
+              credentials: 'omit'
+            });
+            const netRes = await fetch(corsReq);
+            if (netRes && netRes.ok && netRes.type !== 'opaque' && request.method === 'GET') {
+              try {
+                await cache.put(request, netRes.clone());
+              } catch (_) {}
+            }
+            return withIsolationHeaders(netRes);
+          }).catch(() => caches.match(request, { ignoreVary: true }))
+        );
         return;
       }
 
-      const coepMode = DEFAULT_COEP;
+      if (request.mode === 'navigate') {
+        event.respondWith(
+          fetch(request)
+            .then((res) => {
+              if (res && res.ok) {
+                const clone = res.clone();
+                caches.open(SHELL_CACHE).then((c) => c.put('./emulator_host.html', clone)).catch(() => {});
+              }
+              return withIsolationHeaders(res);
+            })
+            .catch(async () => {
+              const cache = await caches.open(SHELL_CACHE);
+              const fallback = (await cache.match('./emulator_host.html')) || (await cache.match('./index.html'));
+              return fallback ? withIsolationHeaders(fallback) : Response.error();
+            })
+        );
+        return;
+      }
+
       const modifiedRequest =
-        coepMode === 'credentialless' && request.mode === 'no-cors'
+        DEFAULT_COEP === 'credentialless' && request.mode === 'no-cors'
           ? new Request(request, { credentials: 'omit' })
           : request;
 
       event.respondWith(
         fetch(modifiedRequest)
-          .then((response) => {
-            if (!response || response.status === 0) {
-              return response;
+          .then((res) => {
+            if (res && res.ok && request.method === 'GET' && new URL(request.url).origin === self.location.origin) {
+              const clone = res.clone();
+              caches.open(SHELL_CACHE).then((c) => c.put(request, clone)).catch(() => {});
             }
-            const headers = new Headers(response.headers);
-            headers.set('Cross-Origin-Opener-Policy', 'same-origin');
-            headers.set('Cross-Origin-Embedder-Policy', coepMode);
-            if (!headers.has('Cross-Origin-Resource-Policy')) {
-              headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
-            }
-            return new Response(response.body, {
-              status: response.status,
-              statusText: response.statusText,
-              headers: headers
-            });
+            return withIsolationHeaders(res);
           })
-          .catch((err) => {
-            console.error('[COI SW] Fetch failed:', err);
-            return fetch(request);
+          .catch(async () => {
+            const cached = await caches.match(request, { ignoreSearch: false });
+            return cached ? withIsolationHeaders(cached) : fetch(request);
           })
       );
     });
   } else {
-    if (window.crossOriginIsolated) return;
-    if (!window.isSecureContext || !('serviceWorker' in navigator)) return;
+    if ('storage' in navigator && typeof navigator.storage.persist === 'function') {
+      navigator.storage.persist().catch(() => {});
+    }
+    if (window.crossOriginIsolated || !window.isSecureContext || !('serviceWorker' in navigator)) return;
 
     const swSrc = (document.currentScript && document.currentScript.src) || 'coi-serviceworker.js';
     navigator.serviceWorker
@@ -85,8 +166,6 @@
           }
         }
       })
-      .catch((err) => {
-        console.warn('[COI] Registration skipped or failed:', err);
-      });
+      .catch(() => {});
   }
 })();

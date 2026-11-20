@@ -9,7 +9,9 @@ import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.view.InputDevice
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -87,6 +89,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -116,6 +119,7 @@ import com.example.data.local.SaveStateEntity
 import com.example.data.preferences.ControlButtonPlacement
 import com.example.data.preferences.RetroSettings
 import com.example.model.RetroSystem
+import com.example.service.OfflineCoreManager
 import com.example.ui.components.CheatManagerDialog
 import com.example.ui.components.EjsButtonIndex
 import com.example.ui.components.EngineStageInfo
@@ -154,6 +158,8 @@ private fun buildLocalFileResponse(
         "Access-Control-Allow-Origin" to "*",
         "Access-Control-Allow-Methods" to "GET, HEAD, OPTIONS",
         "Access-Control-Allow-Headers" to "*",
+        "Cross-Origin-Opener-Policy" to "same-origin",
+        "Cross-Origin-Embedder-Policy" to "credentialless",
         "Cross-Origin-Resource-Policy" to "cross-origin",
         "Accept-Ranges" to "bytes",
         "Cache-Control" to "no-store"
@@ -207,10 +213,13 @@ private fun buildLocalFileResponse(
 fun PlayScreen(
     game: GameEntity,
     isEngineTestMode: Boolean,
+    isOnline: Boolean,
+    offlineCoreManager: OfflineCoreManager,
     settings: RetroSettings,
     saveStates: List<SaveStateEntity>,
     cheats: List<CheatEntity>,
     connectedGamepadName: String?,
+    connectedGamepadNames: List<String>,
     aiBusy: Boolean,
     aiDiagnosticResult: String?,
     onBack: () -> Unit,
@@ -236,6 +245,7 @@ fun PlayScreen(
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val sys = RetroSystem.fromId(game.systemId)
+    val currentOnline by rememberUpdatedState(isOnline)
 
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var currentFps by remember { mutableIntStateOf(60) }
@@ -294,6 +304,15 @@ fun PlayScreen(
     var showPspDialog by remember(game.id) {
         mutableStateOf(!isEngineTestMode && sys == RetroSystem.PSP && settings.pspWarningEnabled)
     }
+
+    val isOversizedPspIso = remember(game.id, isEngineTestMode) {
+        !isEngineTestMode && sys == RetroSystem.PSP &&
+            game.fileName.lowercase().endsWith(".iso") &&
+            ((game.localFilePath?.let { File(it).takeIf { f -> f.exists() }?.length() } ?: game.fileSizeBytes) > 400L * 1024L * 1024L)
+    }
+    var oversizedPspConfirmed by remember(game.id) { mutableStateOf(!isOversizedPspIso) }
+    var webGamepadNames by remember { mutableStateOf<List<String>>(emptyList()) }
+    var initialWebBootTriggered by remember(game.id) { mutableStateOf(false) }
 
     // Wake lock & orientation lock management
     val activity = context as? Activity
@@ -365,6 +384,17 @@ fun PlayScreen(
 
         val localRom = game.localFilePath?.let { File(it) }?.takeIf { it.exists() }
         if (localRom != null) {
+            if (!isOnline && !offlineCoreManager.isSystemReadyOffline(sys.id, resolvedCore)) {
+                engineStatus = "error"
+                engineErrorDetail = "OFFLINE_NOT_PREPARED|" + if (isArabic) {
+                    "هذا النظام (${sys.shortName}) يحتاج تجهيزاً مرة واحدة بالإنترنت من الإعدادات ← الحزمة الأوفلاين."
+                } else {
+                    "This system (${sys.shortName}) requires a one-time online setup in Settings -> Offline Bundles."
+                }
+                diagnosticLogs = "[OFFLINE] Missing offline core bundle for ${sys.id} ($resolvedCore)."
+                onDiagnosticLogsChanged(diagnosticLogs)
+                return
+            }
             val encodedFile = Uri.encode(game.fileName)
             val romUrl = "https://retroverse.local/rom/${game.id}/$encodedFile"
             val biosUrl = if (resolvedBiosFile != null) {
@@ -417,7 +447,8 @@ fun PlayScreen(
             )
         }
         wv.evaluateJavascript(
-            "window.RetroConfig && window.RetroConfig.applySettings('${settings.filterMode}', ${settings.scanlinesEnabled}, '${settings.aspectRatio}', ${settings.soundVolume}, ${settings.audioMuted}, ${settings.renderScalePercent});",
+            "window.RetroConfig && window.RetroConfig.applySettings('${settings.filterMode}', ${settings.scanlinesEnabled}, '${settings.aspectRatio}', ${settings.soundVolume}, ${settings.audioMuted}, ${settings.renderScalePercent});" +
+                "window.RetroConfig && window.RetroConfig.setGamepadOptions(${settings.gamepadDeadzone}, ${settings.hapticsEnabled});",
             null
         )
     }
@@ -429,12 +460,24 @@ fun PlayScreen(
         settings.aspectRatio,
         settings.soundVolume,
         settings.audioMuted,
-        settings.renderScalePercent
+        settings.renderScalePercent,
+        settings.gamepadDeadzone,
+        settings.hapticsEnabled
     ) {
         webViewRef?.evaluateJavascript(
-            "window.RetroConfig && window.RetroConfig.applySettings('${settings.filterMode}', ${settings.scanlinesEnabled}, '${settings.aspectRatio}', ${settings.soundVolume}, ${settings.audioMuted}, ${settings.renderScalePercent});",
+            "window.RetroConfig && window.RetroConfig.applySettings('${settings.filterMode}', ${settings.scanlinesEnabled}, '${settings.aspectRatio}', ${settings.soundVolume}, ${settings.audioMuted}, ${settings.renderScalePercent});" +
+                "window.RetroConfig && window.RetroConfig.setGamepadOptions(${settings.gamepadDeadzone}, ${settings.hapticsEnabled});",
             null
         )
+    }
+
+    // Boot engine automatically once user confirms >400MB PSP ISO warning if deferred
+    LaunchedEffect(oversizedPspConfirmed, webViewRef) {
+        val wv = webViewRef ?: return@LaunchedEffect
+        if (oversizedPspConfirmed && !initialWebBootTriggered && wv.width > 100 && wv.height > 100) {
+            initialWebBootTriggered = true
+            bootEngineInWebView(wv)
+        }
     }
 
     // Live sync cheats when toggled inside PlayScreen
@@ -460,6 +503,13 @@ fun PlayScreen(
         )
     }
 
+    fun sendPlayerInput(playerIdx: Int, idx: Int, value: Float) {
+        webViewRef?.evaluateJavascript(
+            "window.RetroInput && window.RetroInput.simulateForPlayer(${playerIdx.coerceIn(0, 3)}, $idx, $value);",
+            null
+        )
+    }
+
     fun triggerSaveToSlot(slotIndex: Int) {
         val wv = webViewRef ?: return
         pendingSaveSlot = slotIndex
@@ -477,8 +527,7 @@ fun PlayScreen(
         }
     }
 
-    // Keyboard & Physical Gamepad mapping
-    val keyBindings = remember(settings.gamepadBindingsJson) { settings.getKeyBindings(0) }
+    // Keyboard & 4-Player Physical Gamepad mapping (per-device profile + player bindings + analog/hat MotionEvent)
     val actionToIndex = remember {
         mapOf(
             "up" to EjsButtonIndex.UP,
@@ -500,7 +549,14 @@ fun PlayScreen(
         )
     }
 
-    val hideTouchDeck = settings.autoHideTouchOnGamepad && connectedGamepadName != null && !editLayoutMode
+    fun resolvePlayerIndex(device: InputDevice?): Int {
+        val name = device?.name ?: return 0
+        val idx = connectedGamepadNames.indexOf(name)
+        return if (idx in 0..3) idx else 0
+    }
+
+    val activeGamepadDisplay = connectedGamepadName ?: webGamepadNames.firstOrNull()
+    val hideTouchDeck = settings.autoHideTouchOnGamepad && activeGamepadDisplay != null && !editLayoutMode
 
     Box(
         modifier = Modifier
@@ -509,7 +565,11 @@ fun PlayScreen(
             .then(if (!isFullscreen) Modifier.statusBarsPadding().navigationBarsPadding() else Modifier)
             .onPreviewKeyEvent { keyEvent ->
                 val native = keyEvent.nativeKeyEvent
-                val customMapped = keyBindings.entries.firstOrNull { it.value == native.keyCode }?.key
+                val dev = native.device
+                val playerIdx = resolvePlayerIndex(dev)
+                val deviceBindings = dev?.name?.let { settings.getGamepadProfileBindings(it) }.orEmpty()
+                val playerBindings = if (deviceBindings.isNotEmpty()) deviceBindings else settings.getKeyBindings(playerIdx)
+                val customMapped = playerBindings.entries.firstOrNull { it.value == native.keyCode }?.key
                 val ejsIdx = if (customMapped != null) {
                     actionToIndex[customMapped.lowercase()]
                 } else {
@@ -529,12 +589,12 @@ fun PlayScreen(
                         KeyEvent.KEYCODE_BUTTON_THUMBL -> EjsButtonIndex.L3
                         KeyEvent.KEYCODE_BUTTON_THUMBR -> EjsButtonIndex.R3
                         KeyEvent.KEYCODE_BUTTON_START, KeyEvent.KEYCODE_ENTER -> EjsButtonIndex.START
-                        KeyEvent.KEYCODE_BUTTON_SELECT, KeyEvent.KEYCODE_SHIFT_RIGHT -> EjsButtonIndex.SELECT
+                        KeyEvent.KEYCODE_BUTTON_SELECT, KeyEvent.KEYCODE_SHIFT_RIGHT, KeyEvent.KEYCODE_SHIFT_LEFT -> EjsButtonIndex.SELECT
                         else -> null
                     }
                 }
                 if (ejsIdx != null) {
-                    sendButtonIndex(ejsIdx, if (native.action == KeyEvent.ACTION_DOWN) 1f else 0f)
+                    sendPlayerInput(playerIdx, ejsIdx, if (native.action == KeyEvent.ACTION_DOWN) 1f else 0f)
                     true
                 } else false
             }
@@ -558,6 +618,8 @@ fun PlayScreen(
                                     ViewGroup.LayoutParams.MATCH_PARENT
                                 )
                                 layoutDirection = View.LAYOUT_DIRECTION_LTR
+                                isFocusable = true
+                                isFocusableInTouchMode = true
                                 setLayerType(View.LAYER_TYPE_HARDWARE, null)
                                 this.settings.javaScriptEnabled = true
                                 this.settings.domStorageEnabled = true
@@ -567,12 +629,46 @@ fun PlayScreen(
                                 this.settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                                 this.settings.mediaPlaybackRequiresUserGesture = false
 
+                                setOnGenericMotionListener { _, event ->
+                                    val isJoystick = (event.source and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK ||
+                                        (event.source and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD
+                                    if (!isJoystick || event.action != MotionEvent.ACTION_MOVE) return@setOnGenericMotionListener false
+                                    val playerIdx = resolvePlayerIndex(event.device)
+                                    val dz = settings.gamepadDeadzone
+                                    val lx = event.getAxisValue(MotionEvent.AXIS_X)
+                                    val ly = event.getAxisValue(MotionEvent.AXIS_Y)
+                                    val rx = event.getAxisValue(MotionEvent.AXIS_Z)
+                                    val ry = event.getAxisValue(MotionEvent.AXIS_RZ)
+                                    val hx = event.getAxisValue(MotionEvent.AXIS_HAT_X)
+                                    val hy = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
+                                    val l2 = maxOf(event.getAxisValue(MotionEvent.AXIS_LTRIGGER), event.getAxisValue(MotionEvent.AXIS_BRAKE))
+                                    val r2 = maxOf(event.getAxisValue(MotionEvent.AXIS_RTRIGGER), event.getAxisValue(MotionEvent.AXIS_GAS))
+
+                                    sendPlayerInput(playerIdx, EjsButtonIndex.L_STICK_RIGHT, if (lx > dz) lx * 32767f else 0f)
+                                    sendPlayerInput(playerIdx, EjsButtonIndex.L_STICK_LEFT, if (lx < -dz) -lx * 32767f else 0f)
+                                    sendPlayerInput(playerIdx, EjsButtonIndex.L_STICK_DOWN, if (ly > dz) ly * 32767f else 0f)
+                                    sendPlayerInput(playerIdx, EjsButtonIndex.L_STICK_UP, if (ly < -dz) -ly * 32767f else 0f)
+
+                                    sendPlayerInput(playerIdx, EjsButtonIndex.R_STICK_RIGHT, if (rx > dz) rx * 32767f else 0f)
+                                    sendPlayerInput(playerIdx, EjsButtonIndex.R_STICK_LEFT, if (rx < -dz) -rx * 32767f else 0f)
+                                    sendPlayerInput(playerIdx, EjsButtonIndex.R_STICK_DOWN, if (ry > dz) ry * 32767f else 0f)
+                                    sendPlayerInput(playerIdx, EjsButtonIndex.R_STICK_UP, if (ry < -dz) -ry * 32767f else 0f)
+
+                                    sendPlayerInput(playerIdx, EjsButtonIndex.LEFT, if (hx < -0.5f) 1f else 0f)
+                                    sendPlayerInput(playerIdx, EjsButtonIndex.RIGHT, if (hx > 0.5f) 1f else 0f)
+                                    sendPlayerInput(playerIdx, EjsButtonIndex.UP, if (hy < -0.5f) 1f else 0f)
+                                    sendPlayerInput(playerIdx, EjsButtonIndex.DOWN, if (hy > 0.5f) 1f else 0f)
+
+                                    sendPlayerInput(playerIdx, EjsButtonIndex.L2, if (l2 > 0.15f) l2 else 0f)
+                                    sendPlayerInput(playerIdx, EjsButtonIndex.R2, if (r2 > 0.15f) r2 else 0f)
+                                    true
+                                }
+
                                 var pageFinished = false
-                                var initialBootStarted = false
                                 fun tryInitialBoot(wv: WebView?) {
-                                    if (wv == null || !pageFinished || initialBootStarted) return
+                                    if (wv == null || !pageFinished || initialWebBootTriggered || !oversizedPspConfirmed) return
                                     if (wv.width > 100 && wv.height > 100) {
-                                        initialBootStarted = true
+                                        initialWebBootTriggered = true
                                         bootEngineInWebView(wv)
                                     }
                                 }
@@ -605,6 +701,29 @@ fun PlayScreen(
                                         post {
                                             engineStatus = status
                                             engineErrorDetail = detail
+                                            if (status == "running") requestFocus()
+                                        }
+                                    }
+
+                                    @JavascriptInterface
+                                    fun onGamepadShortcut(action: String) {
+                                        post {
+                                            when (action) {
+                                                "menu" -> drawerExpanded = !drawerExpanded
+                                                "save" -> triggerSaveToSlot(1)
+                                            }
+                                        }
+                                    }
+
+                                    @JavascriptInterface
+                                    fun onWebGamepadsChanged(count: Int, namesJson: String) {
+                                        post {
+                                            val list = mutableListOf<String>()
+                                            runCatching {
+                                                val arr = JSONArray(namesJson)
+                                                for (i in 0 until arr.length()) list.add(arr.optString(i))
+                                            }
+                                            webGamepadNames = list
                                         }
                                     }
 
@@ -661,36 +780,7 @@ fun PlayScreen(
                                     val u = request?.url?.toString() ?: return null
                                     val method = request.method ?: "GET"
 
-                                    if (u.startsWith("https://retroverse.local/") && method.equals("OPTIONS", ignoreCase = true)) {
-                                        return WebResourceResponse(
-                                            "text/plain", "UTF-8", 200, "OK",
-                                            mapOf(
-                                                "Access-Control-Allow-Origin" to "*",
-                                                "Access-Control-Allow-Methods" to "GET, HEAD, OPTIONS",
-                                                "Access-Control-Allow-Headers" to "*",
-                                                "Cross-Origin-Resource-Policy" to "cross-origin"
-                                            ),
-                                            ByteArrayInputStream(ByteArray(0))
-                                        )
-                                    }
-
-                                    if (u.startsWith("https://retroverse.local/coi-serviceworker.js")) {
-                                        val coiStream = runCatching { context.assets.open("coi-serviceworker.js") }.getOrElse { ByteArrayInputStream(ByteArray(0)) }
-                                        return WebResourceResponse(
-                                            "application/javascript", "UTF-8", 200, "OK",
-                                            mapOf("Access-Control-Allow-Origin" to "*"),
-                                            coiStream
-                                        )
-                                    }
-
-                                    if (u.startsWith("https://retroverse.local/emulator_host.html")) {
-                                        val htmlStream = context.assets.open("emulator_host.html")
-                                        return WebResourceResponse(
-                                            "text/html", "UTF-8", 200, "OK",
-                                            mapOf("Access-Control-Allow-Origin" to "*"),
-                                            htmlStream
-                                        )
-                                    }
+                                    offlineCoreManager.interceptRetroLocalOrCdn(u, method, currentOnline)?.let { return it }
 
                                     if (u.startsWith("https://retroverse.local/rom/")) {
                                         val filePath = game.localFilePath ?: return null
@@ -898,6 +988,27 @@ fun PlayScreen(
                     topHudBar()
                 }
 
+                if (activeGamepadDisplay != null || (isLandscape && engineStatus == "running")) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(top = if (hudVisible) 50.dp else 8.dp, start = 12.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = if (activeGamepadDisplay != null) {
+                                if (isArabic) "تم توصيل: $activeGamepadDisplay" else "Connected: $activeGamepadDisplay"
+                            } else {
+                                if (isArabic) "اضغط أي زر في اليد لتفعيلها" else "Press any controller button to activate"
+                            },
+                            color = if (activeGamepadDisplay != null) SuccessGreen else TextSecondary,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+
                 if (engineStatus == "error") {
                     Box(
                         modifier = Modifier
@@ -1015,9 +1126,9 @@ fun PlayScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = if (isArabic) "يد التحكم متصلة: $connectedGamepadName" else "Controller active: $connectedGamepadName",
-                                    color = SecondaryCyan,
-                                    style = MaterialTheme.typography.bodyMedium
+                                    text = if (isArabic) "تم توصيل: $activeGamepadDisplay" else "Connected: $activeGamepadDisplay",
+                                    color = SuccessGreen,
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
                                 )
                             }
                         }
@@ -1184,7 +1295,44 @@ fun PlayScreen(
         )
     }
 
-    if (showPspDialog) {
+    if (isOversizedPspIso && !oversizedPspConfirmed) {
+        AlertDialog(
+            onDismissRequest = onBack,
+            containerColor = SurfaceDark,
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.Warning, contentDescription = null, tint = WarningAmber)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (isArabic) "ملف PSP ISO كبير (> 400 MB)" else "Large PSP ISO (> 400 MB)",
+                        color = WarningAmber
+                    )
+                }
+            },
+            text = {
+                Text(
+                    text = if (isArabic) {
+                        "حجم ملف .iso هذا يتجاوز 400 ميجابايت وقد يسبب بطئاً أو امتلاء الذاكرة داخل WebView. يُنصح بتحويله إلى صيغة مضغوطة (.cso أو .pbp) لأداء أسرع واستقرار أفضل."
+                    } else {
+                        "This .iso file exceeds 400 MB and may exceed WebView RAM. Converting it to compressed .cso or .pbp is strongly recommended."
+                    },
+                    color = TextSecondary
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { oversizedPspConfirmed = true }) {
+                    Text(if (isArabic) "تشغيل على أي حال" else "Run Anyway", color = SecondaryCyan)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onBack) {
+                    Text(if (isArabic) "إلغاء" else "Cancel", color = TextSecondary)
+                }
+            }
+        )
+    }
+
+    if (showPspDialog && oversizedPspConfirmed) {
         AlertDialog(
             onDismissRequest = { showPspDialog = false },
             containerColor = SurfaceDark,

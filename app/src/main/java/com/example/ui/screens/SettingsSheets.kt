@@ -30,12 +30,17 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.DeveloperBoard
 import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.Gamepad
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Warning
@@ -43,6 +48,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
@@ -77,6 +83,9 @@ import com.example.model.RetroSystem
 import com.example.service.AiPerfRecommendation
 import com.example.service.DeviceSpecSummary
 import com.example.service.GeminiAssistantService
+import com.example.service.OfflineCoreBundleState
+import com.example.service.OfflineDiagnosticsReport
+import com.example.service.OfflinePrepProgress
 import com.example.service.RomBundler
 import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.ErrorRose
@@ -474,22 +483,32 @@ fun PerformanceEngineDialog(
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun GamepadMappingDialog(
     settings: RetroSettings,
     connectedGamepadName: String?,
+    connectedGamepadNames: List<String>,
     onDismiss: () -> Unit,
     onUpdateAutoHideTouch: (Boolean) -> Unit,
     onUpdateDeadzone: (Float) -> Unit,
     onSaveKeyBinding: (playerIndex: Int, actionId: String, keyCode: Int) -> Unit,
-    onResetKeyBindings: (playerIndex: Int) -> Unit
+    onResetKeyBindings: (playerIndex: Int) -> Unit,
+    onSaveGamepadProfileBinding: (gamepadId: String, actionId: String, keyCode: Int) -> Unit,
+    onResetGamepadProfileBindings: (gamepadId: String) -> Unit
 ) {
     val strings = LocalAppStrings.current
     val isArabic = LocalIsArabic.current
     var selectedPlayer by remember { mutableIntStateOf(0) }
+    var useDeviceProfile by remember(connectedGamepadName) { mutableStateOf(connectedGamepadName != null) }
     var capturingAction by remember { mutableStateOf<String?>(null) }
     val focusRequester = remember { FocusRequester() }
-    val bindings = settings.getKeyBindings(selectedPlayer)
+    val activeProfileId = connectedGamepadName.orEmpty()
+    val bindings = if (useDeviceProfile && activeProfileId.isNotBlank()) {
+        settings.getGamepadProfileBindings(activeProfileId)
+    } else {
+        settings.getKeyBindings(selectedPlayer)
+    }
 
     LaunchedEffect(capturingAction) {
         if (capturingAction != null) {
@@ -510,6 +529,8 @@ fun GamepadMappingDialog(
         "R1" to "R1 / R",
         "L2" to "L2",
         "R2" to "R2",
+        "L3" to "L3",
+        "R3" to "R3",
         "START" to "Start",
         "SELECT" to "Select"
     )
@@ -526,7 +547,11 @@ fun GamepadMappingDialog(
                     .onPreviewKeyEvent { ev ->
                         val target = capturingAction ?: return@onPreviewKeyEvent false
                         if (ev.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
-                            onSaveKeyBinding(selectedPlayer, target, ev.nativeKeyEvent.keyCode)
+                            if (useDeviceProfile && activeProfileId.isNotBlank()) {
+                                onSaveGamepadProfileBinding(activeProfileId, target, ev.nativeKeyEvent.keyCode)
+                            } else {
+                                onSaveKeyBinding(selectedPlayer, target, ev.nativeKeyEvent.keyCode)
+                            }
                             capturingAction = null
                             true
                         } else false
@@ -534,11 +559,15 @@ fun GamepadMappingDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    text = connectedGamepadName?.let {
-                        if (isArabic) "✓ يد التحكم المتصلة: $it" else "✓ Connected: $it"
-                    } ?: if (isArabic) "لم يتم اكتشاف يد بلوتوث/USB (يدعم الكيبورد أيضاً)" else "No external controller detected (keyboard supported)",
+                    text = if (connectedGamepadNames.isNotEmpty()) {
+                        if (isArabic) "✓ تم توصيل (${connectedGamepadNames.size}): ${connectedGamepadNames.joinToString(", ")}"
+                        else "✓ Connected (${connectedGamepadNames.size}): ${connectedGamepadNames.joinToString(", ")}"
+                    } else {
+                        if (isArabic) "اضغط أي زر في اليد لتفعيلها (يدعم أيضاً لوحة المفاتيح HID حتى 4 لاعبين)"
+                        else "Press any button on gamepad to activate (4-player & HID keyboard supported)"
+                    },
                     style = MaterialTheme.typography.labelMedium,
-                    color = if (connectedGamepadName != null) SuccessGreen else TextSecondary
+                    color = if (connectedGamepadNames.isNotEmpty()) SuccessGreen else WarningAmber
                 )
 
                 CompactSwitchRow(
@@ -560,9 +589,19 @@ fun GamepadMappingDialog(
                     colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = SecondaryCyan)
                 )
 
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (activeProfileId.isNotBlank()) {
+                        SelectPill(
+                            label = if (isArabic) "ملف اليد: ${activeProfileId.take(14)}" else "Device: ${activeProfileId.take(14)}",
+                            selected = useDeviceProfile
+                        ) {
+                            useDeviceProfile = true
+                            capturingAction = null
+                        }
+                    }
                     (0..3).forEach { idx ->
-                        SelectPill("P${idx + 1}", selectedPlayer == idx) {
+                        SelectPill("P${idx + 1}", !useDeviceProfile && selectedPlayer == idx) {
+                            useDeviceProfile = false
                             selectedPlayer = idx
                             capturingAction = null
                         }
@@ -617,7 +656,13 @@ fun GamepadMappingDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onResetKeyBindings(selectedPlayer) }) {
+            TextButton(onClick = {
+                if (useDeviceProfile && activeProfileId.isNotBlank()) {
+                    onResetGamepadProfileBindings(activeProfileId)
+                } else {
+                    onResetKeyBindings(selectedPlayer)
+                }
+            }) {
                 Text(strings.resetLayout, color = ErrorRose)
             }
         },
@@ -912,3 +957,305 @@ private fun CompactSwitchRow(
         )
     }
 }
+
+@Composable
+fun OfflineBundlesDialog(
+    isOnline: Boolean,
+    bundles: List<OfflineCoreBundleState>,
+    prepProgress: OfflinePrepProgress?,
+    onDismiss: () -> Unit,
+    onPrepareSystem: (RetroSystem) -> Unit,
+    onPrepareAll: () -> Unit,
+    onCancelPrep: () -> Unit,
+    onDeleteBundle: (systemId: String) -> Unit
+) {
+    val strings = LocalAppStrings.current
+    val isArabic = LocalIsArabic.current
+    val readyCount = bundles.count { it.isReady }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SurfaceDark,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = if (isOnline) Icons.Rounded.CloudDone else Icons.Rounded.CloudOff,
+                        contentDescription = null,
+                        tint = if (isOnline) SuccessGreen else WarningAmber
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = if (isArabic) "الحزمة الأوفلاين ($readyCount/${bundles.size})"
+                        else "Offline Bundles ($readyCount/${bundles.size})",
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = if (isArabic) {
+                        "حمّل نواة كل نظام مرة واحدة بالإنترنت لتشغيل جميع ألعابه لاحقاً أوفلاين بالكامل (تُطابق إعداد Threads الفعلي)."
+                    } else {
+                        "Pre-download each system core once online to run all its games 100% offline (uses exact gameplay Threads config)."
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = TextSecondary
+                )
+
+                if (prepProgress != null) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(SurfaceElevated)
+                            .border(1.dp, SecondaryCyan.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (prepProgress.isBulk) {
+                                    "${prepProgress.statusLabel} (${prepProgress.bulkIndex}/${prepProgress.bulkTotal})"
+                                } else prepProgress.statusLabel,
+                                color = SecondaryCyan,
+                                style = MaterialTheme.typography.labelMedium,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(onClick = onCancelPrep) {
+                                Text(strings.cancelAction, color = ErrorRose, fontSize = 11.sp)
+                            }
+                        }
+                        LinearProgressIndicator(
+                            progress = { prepProgress.percent / 100f },
+                            modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp)),
+                            color = SecondaryCyan,
+                            trackColor = Color.White.copy(alpha = 0.1f)
+                        )
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Brush.horizontalGradient(listOf(PrimaryPurple, SecondaryCyan)))
+                            .clickable(enabled = isOnline, onClick = onPrepareAll)
+                            .padding(vertical = 10.dp, horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(Icons.Rounded.CloudDownload, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = if (!isOnline) {
+                                if (isArabic) "تجهيز الكل (يحتاج إنترنت)" else "Prepare All (Needs Internet)"
+                            } else {
+                                if (isArabic) "تجهيز الكل للعمل بدون إنترنت" else "Prepare All Systems Offline"
+                            },
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                }
+
+                LazyColumn(
+                    modifier = Modifier.heightIn(max = 320.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(bundles, key = { it.systemId }) { item ->
+                        val sys = RetroSystem.fromId(item.systemId)
+                        val sizeText = if (item.isReady && item.cachedBytes > 0L) {
+                            RomBundler.formatFileSize(item.cachedBytes)
+                        } else item.approxSizeLabel
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(SurfaceElevated)
+                                .border(
+                                    1.dp,
+                                    if (item.isReady) SuccessGreen.copy(alpha = 0.45f) else BorderSubtle,
+                                    RoundedCornerShape(12.dp)
+                                )
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "${item.shortName} • ${item.coreId}",
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                                )
+                                Text(
+                                    text = if (item.isReady) {
+                                        (if (isArabic) "جاهز للأوفلاين ✓" else "Ready offline ✓") + " • $sizeText"
+                                    } else {
+                                        (if (isArabic) "غير محمّل" else "Not downloaded") + " • $sizeText"
+                                    },
+                                    color = if (item.isReady) SuccessGreen else TextSecondary,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+
+                            if (item.isReady) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Rounded.CheckCircle,
+                                        contentDescription = null,
+                                        tint = SuccessGreen,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    IconButton(
+                                        onClick = { onDeleteBundle(item.systemId) },
+                                        modifier = Modifier.size(34.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.DeleteOutline,
+                                            contentDescription = if (isArabic) "حذف الحزمة" else "Delete Bundle",
+                                            tint = ErrorRose,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            } else {
+                                MiniChipBtn(
+                                    icon = Icons.Rounded.CloudDownload,
+                                    label = if (isArabic) "تجهيز للأوفلاين" else "Prepare",
+                                    onClick = {
+                                        if (prepProgress == null) onPrepareSystem(sys)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(strings.close, color = SecondaryCyan) }
+        }
+    )
+}
+
+@Composable
+fun OfflineDiagnosticsDialog(
+    report: OfflineDiagnosticsReport?,
+    onRefresh: () -> Unit,
+    onClearOfflineCache: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val strings = LocalAppStrings.current
+    val isArabic = LocalIsArabic.current
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SurfaceDark,
+        title = {
+            Text(
+                text = if (isArabic) "تشخيص الأوفلاين والأداء" else "Offline & Hardware Diagnostics",
+                color = Color.White
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 400.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (report == null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = SecondaryCyan)
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (isArabic) "جاري الفحص..." else "Checking...", color = TextSecondary)
+                    }
+                } else {
+                    DiagKvRow(
+                        label = if (isArabic) "حالة الشبكة" else "Network",
+                        value = if (report.isOnline) (if (isArabic) "متصل بالإنترنت" else "Online") else (if (isArabic) "وضع الأوفلاين" else "Offline"),
+                        good = report.isOnline
+                    )
+                    DiagKvRow(
+                        label = "Service Worker",
+                        value = report.swStatus,
+                        good = report.swStatus == "controlled" || report.swStatus == "active_uncontrolled"
+                    )
+                    DiagKvRow(
+                        label = "crossOriginIsolated / SAB",
+                        value = if (report.isolated && report.sharedArrayBuffer) "✓ Active (PSP Threads OK)" else "✗ Inactive",
+                        good = report.isolated && report.sharedArrayBuffer
+                    )
+                    val totalCacheStr = RomBundler.formatFileSize(report.androidCacheBytes + report.webStorageUsageBytes)
+                    val quotaStr = if (report.webStorageQuotaBytes > 0) RomBundler.formatFileSize(report.webStorageQuotaBytes) else "N/A"
+                    DiagKvRow(
+                        label = if (isArabic) "حجم الكاش / الحصة" else "Cache Size / Quota",
+                        value = "$totalCacheStr / $quotaStr (${report.webCacheEntries} web)",
+                        good = (report.androidCacheBytes + report.webStorageUsageBytes) > 0L
+                    )
+                    DiagKvRow(
+                        label = if (isArabic) "الأنظمة الجاهزة أوفلاين (${report.readySystems.size})" else "Prepared Systems (${report.readySystems.size})",
+                        value = if (report.readySystems.isEmpty()) (if (isArabic) "لا يوجد بعد" else "None yet") else report.readySystems.joinToString(", "),
+                        good = report.readySystems.isNotEmpty()
+                    )
+                    val allPads = (report.androidGamepads + report.webGamepads).distinct()
+                    DiagKvRow(
+                        label = if (isArabic) "أيدي التحكم المتصلة (${allPads.size})" else "Connected Gamepads (${allPads.size})",
+                        value = if (allPads.isEmpty()) (if (isArabic) "0 — اضغط أي زر في اليد لتفعيلها" else "0 — Press any controller button") else allPads.joinToString(", "),
+                        good = allPads.isNotEmpty()
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    MiniChipBtn(
+                        icon = Icons.Rounded.Refresh,
+                        label = if (isArabic) "تحديث الفحص" else "Re-check",
+                        modifier = Modifier.weight(1f),
+                        onClick = onRefresh
+                    )
+                    MiniChipBtn(
+                        icon = Icons.Rounded.DeleteOutline,
+                        label = if (isArabic) "مسح كاش الأوفلاين" else "Clear Offline Cache",
+                        modifier = Modifier.weight(1f),
+                        onClick = onClearOfflineCache
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(strings.close, color = SecondaryCyan) }
+        }
+    )
+}
+
+@Composable
+private fun DiagKvRow(label: String, value: String, good: Boolean) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(SurfaceElevated)
+            .border(1.dp, if (good) SuccessGreen.copy(alpha = 0.35f) else BorderSubtle, RoundedCornerShape(10.dp))
+            .padding(10.dp)
+    ) {
+        Text(label, color = TextSecondary, style = MaterialTheme.typography.labelSmall)
+        Spacer(Modifier.height(2.dp))
+        Text(
+            value,
+            color = if (good) SuccessGreen else Color.White,
+            style = MaterialTheme.typography.labelMedium.copy(fontFamily = JetBrainsMonoFontFamily)
+        )
+    }
+}
+

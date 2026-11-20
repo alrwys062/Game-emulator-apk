@@ -142,6 +142,22 @@ data class RetroSettings(
             out
         }.getOrDefault(emptyMap())
     }
+
+    fun getGamepadProfileBindings(gamepadId: String): Map<String, Int> {
+        if (gamepadId.isBlank()) return emptyMap()
+        return runCatching {
+            val root = JSONObject(gamepadBindingsJson)
+            val profiles = root.optJSONObject("profiles") ?: return emptyMap()
+            val gObj = profiles.optJSONObject(gamepadId) ?: return emptyMap()
+            val out = mutableMapOf<String, Int>()
+            val keys = gObj.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                out[k] = gObj.getInt(k)
+            }
+            out
+        }.getOrDefault(emptyMap())
+    }
 }
 
 class SettingsRepository(private val context: Context) {
@@ -391,6 +407,29 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { prefs ->
             val root = runCatching { JSONObject(prefs[Keys.GAMEPAD_BINDINGS_JSON] ?: "{}") }.getOrElse { JSONObject() }
             root.remove("p$playerIndex")
+            prefs[Keys.GAMEPAD_BINDINGS_JSON] = root.toString()
+        }
+    }
+
+    suspend fun saveGamepadProfileBinding(gamepadId: String, actionId: String, keyOrButtonCode: Int) {
+        if (gamepadId.isBlank()) return
+        context.dataStore.edit { prefs ->
+            val root = runCatching { JSONObject(prefs[Keys.GAMEPAD_BINDINGS_JSON] ?: "{}") }.getOrElse { JSONObject() }
+            val profiles = root.optJSONObject("profiles") ?: JSONObject()
+            val gObj = profiles.optJSONObject(gamepadId) ?: JSONObject()
+            gObj.put(actionId, keyOrButtonCode)
+            profiles.put(gamepadId, gObj)
+            root.put("profiles", profiles)
+            prefs[Keys.GAMEPAD_BINDINGS_JSON] = root.toString()
+        }
+    }
+
+    suspend fun resetGamepadProfileBindings(gamepadId: String) {
+        if (gamepadId.isBlank()) return
+        context.dataStore.edit { prefs ->
+            val root = runCatching { JSONObject(prefs[Keys.GAMEPAD_BINDINGS_JSON] ?: "{}") }.getOrElse { JSONObject() }
+            val profiles = root.optJSONObject("profiles")
+            profiles?.remove(gamepadId)
             prefs[Keys.GAMEPAD_BINDINGS_JSON] = root.toString()
         }
     }

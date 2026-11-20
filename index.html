@@ -2,69 +2,94 @@
 <html lang="ar" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#07080D"><title>RetroVerse</title>
-<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-:root{--bg:#07080D;--s1:#10121A;--s2:#171A25;--ln:#ffffff14;--tx:#F3F4FA;--mu:#8A90A8;--g:linear-gradient(135deg,#8B5CF6,#22D3EE)}
-html,body{height:100%;background:var(--bg);color:var(--tx);font-family:Cairo,system-ui,sans-serif;overflow:hidden}
+:root{--bg:#07080D;--s1:#10121A;--s2:#171A25;--ln:#ffffff14;--tx:#F3F4FA;--mu:#8A90A8;--g:linear-gradient(135deg,#8B5CF6,#22D3EE);--ok:#34D399;--warn:#FBBF24;--err:#F43F5E}
+html,body{height:100%;background:var(--bg);color:var(--tx);font-family:system-ui,-apple-system,'Segoe UI',Tahoma,sans-serif;overflow:hidden}
 #app{height:100%;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top)}
+#offbar{display:none;align-items:center;justify-content:center;gap:8px;padding:7px 14px;background:#fbbf2424;border-bottom:1px solid #fbbf2455;color:var(--warn);font-size:12px;font-weight:700;flex:none}
+#offbar.on{display:flex}
 .pg{flex:1;overflow-y:auto;padding:14px 16px 110px;display:none}.pg.on{display:block}
-h1{font-size:26px;font-weight:800;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
-.nav{position:fixed;bottom:calc(14px + env(safe-area-inset-bottom));left:16px;right:16px;height:66px;border-radius:33px;background:#161924e6;backdrop-filter:blur(14px);border:1px solid #ffffff1c;display:flex;justify-content:space-around;align-items:center;z-index:5}
-.nav b{height:46px;min-width:46px;border-radius:23px;display:flex;align-items:center;justify-content:center;color:var(--mu);font-size:13px;font-weight:600;padding:0 14px}
+h1{font-size:25px;font-weight:800;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.nav{position:fixed;bottom:calc(14px + env(safe-area-inset-bottom));left:16px;right:16px;height:64px;border-radius:32px;background:#161924eb;backdrop-filter:blur(14px);border:1px solid #ffffff1c;display:flex;justify-content:space-around;align-items:center;z-index:5}
+.nav b{height:44px;min-width:46px;border-radius:22px;display:flex;align-items:center;justify-content:center;color:var(--mu);font-size:13px;font-weight:700;padding:0 16px;cursor:pointer}
 .nav b.on{background:var(--g);color:#fff}
-.btn{background:var(--g);color:#fff;border:0;border-radius:22px;padding:10px 18px;font:600 14px Cairo;cursor:pointer}
+.btn{background:var(--g);color:#fff;border:0;border-radius:20px;padding:9px 16px;font:700 13px system-ui,sans-serif;cursor:pointer}
 .btn.g{background:var(--s2);border:1px solid var(--ln)}
-.chips{display:flex;gap:8px;overflow-x:auto;margin:10px 0;padding-bottom:4px}.chips span{flex:none;padding:7px 15px;border-radius:18px;background:var(--s1);border:1px solid var(--ln);font-size:13px;color:var(--mu)}.chips .on{background:var(--tx);color:#07080D;font-weight:800}
-input[type=text],input[type=search],input[type=password],textarea,select{width:100%;background:var(--s1);border:1px solid var(--ln);color:var(--tx);border-radius:16px;padding:12px 14px;font:14px Cairo;margin:4px 0}
-.gr{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px}
-.cd{position:relative}.cv{aspect-ratio:1;border-radius:22px;border:1px solid var(--ln);background-size:cover;background-position:center;position:relative;overflow:hidden}
-.cv i{position:absolute;top:8px;right:8px;font:800 10px Cairo;font-style:normal;padding:3px 9px;border-radius:9px;background:#000b}
-.cd p{font-size:12px;font-weight:600;margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.cd .mn{position:absolute;bottom:34px;left:8px;width:30px;height:30px;border-radius:50%;background:#000b;display:flex;align-items:center;justify-content:center}
-.row{display:flex;align-items:center;gap:12px;background:var(--s1);border:1px solid var(--ln);border-radius:20px;padding:13px 15px;margin-bottom:10px;font-size:14px}
+.btn.sm{padding:6px 11px;font-size:12px;border-radius:14px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.chips{display:flex;gap:8px;overflow-x:auto;margin:10px 0;padding-bottom:4px}.chips span{flex:none;padding:7px 14px;border-radius:18px;background:var(--s1);border:1px solid var(--ln);font-size:13px;color:var(--mu);cursor:pointer}.chips .on{background:var(--tx);color:#07080D;font-weight:800}
+input[type=text],input[type=search],input[type=password],textarea,select{width:100%;background:var(--s1);border:1px solid var(--ln);color:var(--tx);border-radius:14px;padding:11px 13px;font:14px system-ui,sans-serif;margin:4px 0}
+.gr{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:14px}
+.cd{position:relative;cursor:pointer}.cv{aspect-ratio:1;border-radius:20px;border:1px solid var(--ln);background-size:cover;background-position:center;position:relative;overflow:hidden}
+.cv i{position:absolute;top:8px;right:8px;font:800 10px system-ui,sans-serif;font-style:normal;padding:3px 9px;border-radius:9px;background:#000b}
+.cd p{font-size:12px;font-weight:700;margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cd .mn{position:absolute;bottom:32px;left:8px;width:30px;height:30px;border-radius:50%;background:#000b;display:flex;align-items:center;justify-content:center}
+.row{display:flex;align-items:center;gap:10px;background:var(--s1);border:1px solid var(--ln);border-radius:18px;padding:12px 14px;margin-bottom:9px;font-size:14px;text-decoration:none;color:var(--tx)}
 .row small{color:var(--mu);display:block;font-size:12px}.row .sp{margin-right:auto}
-.ok{color:#34D399}.bad{color:#FBBF24}
-.sec{font-weight:800;margin:18px 2px 8px;font-size:15px}
-#sheet{position:fixed;inset:0;background:#000a;z-index:20;display:none;align-items:flex-end}#sheet.on{display:flex}
-#sheet>div{width:100%;max-height:85%;overflow-y:auto;background:#12141d;border-radius:30px 30px 0 0;padding:18px 18px calc(24px + env(safe-area-inset-bottom));border-top:1px solid #ffffff2a}
-.splash{position:fixed;inset:0;background:var(--bg);z-index:50;display:flex;align-items:center;justify-content:center;font:800 34px Cairo;letter-spacing:6px;transition:opacity .6s}
+.row.dis{opacity:.5;pointer-events:none}
+.ok{color:var(--ok)}.bad{color:var(--warn)}.er{color:var(--err)}
+.sec{font-weight:800;margin:16px 2px 8px;font-size:14px;color:#cbd5e1}
+.prog{width:100%;height:7px;border-radius:99px;background:var(--s2);overflow:hidden;margin:8px 0}.prog>div{height:100%;background:var(--g);width:0%;transition:width .25s}
+#sheet{position:fixed;inset:0;background:#000a;z-index:40;display:none;align-items:flex-end}#sheet.on{display:flex}
+#sheet>div{width:100%;max-height:86%;overflow-y:auto;background:#12141d;border-radius:28px 28px 0 0;padding:18px 18px calc(24px + env(safe-area-inset-bottom));border-top:1px solid #ffffff2a}
+.splash{position:fixed;inset:0;background:var(--bg);z-index:50;display:flex;align-items:center;justify-content:center;font:800 32px system-ui,sans-serif;letter-spacing:6px;transition:opacity .5s}
 .splash span{background:var(--g);-webkit-background-clip:text;color:transparent}
 /* PLAYER */
 #pl{position:fixed;inset:0;background:#000;z-index:30;display:none;flex-direction:column}#pl.on{display:flex}
-#bar{height:46px;display:flex;align-items:center;gap:8px;padding:0 10px;padding-top:env(safe-area-inset-top);background:#0b0d14;flex:none}
-#bar b{width:36px;height:36px;border-radius:12px;background:#ffffff14;display:flex;align-items:center;justify-content:center;font-size:16px}
+#bar{height:48px;display:flex;align-items:center;gap:8px;padding:0 10px;padding-top:env(safe-area-inset-top);background:#0b0d14;flex:none;z-index:12}
+#bar b{width:34px;height:34px;border-radius:11px;background:#ffffff14;display:flex;align-items:center;justify-content:center;font-size:15px;cursor:pointer;flex:none}
 #bar span{flex:1;font-size:13px;color:var(--mu);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#scr{position:relative;width:100%;aspect-ratio:4/3;background:#000;flex:none}#fr{width:100%;height:100%;border:0;display:block}
-#pad{flex:1;position:relative;background:linear-gradient(180deg,#0b0d14,#07080D);touch-action:none;user-select:none}
-#pad .k{position:absolute;display:flex;align-items:center;justify-content:center;border-radius:50%;background:#ffffff1c;border:1.5px solid #ffffff3a;color:#fff;font:800 16px Cairo;touch-action:none}
+#gpbadge{display:none;padding:3px 9px;border-radius:10px;background:#34d39922;border:1px solid #34d39955;color:var(--ok);font-size:11px;font-weight:700;max-width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#gpbadge.wait{background:#fbbf2422;border-color:#fbbf2455;color:var(--warn)}
+#gpbadge.on{display:inline-block}
+/* Viewport wrapper — guaranteed non-zero dimensions */
+#scr{position:relative;flex:none;width:100vw;height:calc(100vw * 3 / 4);max-height:62dvh;margin:0 auto;background:#000;direction:ltr}
+#fr{position:absolute;inset:0;width:100%;height:100%;border:0;display:block}
+#pad{flex:1;position:relative;background:linear-gradient(180deg,#0b0d14,#07080D);touch-action:none;user-select:none;direction:ltr}
+#pad .k{position:absolute;display:flex;align-items:center;justify-content:center;border-radius:50%;background:#ffffff1c;border:1.5px solid #ffffff3a;color:#fff;font:800 15px system-ui,sans-serif;touch-action:none}
 #pad .k.on{background:#8B5CF6aa}#pad .r{border-radius:12px}
-#pad .js{position:absolute;width:120px;height:120px;border-radius:50%;background:#ffffff12;border:2px solid #ffffff33;touch-action:none}
-#pad .js i{position:absolute;width:52px;height:52px;border-radius:50%;background:#ffffff55;left:34px;top:34px}
+#pad .js{position:absolute;width:116px;height:116px;border-radius:50%;background:#ffffff12;border:2px solid #ffffff33;touch-action:none}
+#pad .js i{position:absolute;width:50px;height:50px;border-radius:50%;background:#ffffff55;left:31px;top:31px}
 .hid #pad{display:none}
-#err{position:absolute;inset:0;background:#07080Df2;z-index:9;display:none;flex-direction:column;padding:18px;gap:10px;overflow:auto}#err.on{display:flex}
-#err pre{background:var(--s1);border-radius:14px;padding:10px;font-size:11px;direction:ltr;white-space:pre-wrap;max-height:30vh;overflow:auto}
-#ld{position:absolute;inset:0;background:#000;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;color:var(--mu);font-size:13px;z-index:8}
-@media (orientation:landscape){#pl{flex-direction:row}#bar{position:absolute;top:0;left:0;right:0;background:transparent;z-index:10}#scr{height:100%;width:auto;aspect-ratio:4/3;margin:0 auto}#pad{position:absolute;inset:0;background:transparent;pointer-events:none}#pad .k,#pad .js{pointer-events:auto}}
+#err{position:absolute;inset:0;background:#07080Df4;z-index:9;display:none;flex-direction:column;padding:16px;gap:10px;overflow:auto;direction:rtl}#err.on{display:flex}
+#err pre{background:var(--s1);border-radius:12px;padding:10px;font-size:11px;direction:ltr;white-space:pre-wrap;max-height:28vh;overflow:auto}
+#ld{position:absolute;inset:0;background:#000e;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;color:var(--mu);font-size:13px;z-index:8;direction:rtl}
+@media (orientation:landscape){
+  #pl{flex-direction:row}
+  #bar{position:absolute;top:0;left:0;right:0;background:linear-gradient(180deg,#0b0d14dd,transparent)}
+  #scr{height:100dvh;max-height:100dvh;width:min(100vw,calc(100dvh * 4 / 3));margin:0 auto}
+  #pad{position:absolute;inset:0;background:transparent;pointer-events:none}
+  #pad .k,#pad .js{pointer-events:auto}
+}
 </style></head><body>
 <div class="splash" id="sp"><span>RETROVERSE</span></div>
 <div id="app">
+ <div id="offbar">⚠ وضع الأوفلاين — الأنظمة المجهّزة ومكتبتك تعمل بلا إنترنت</div>
  <div class="pg on" id="p-lib"><h1>المكتبة <button class="btn" id="imp">＋ استيراد</button></h1>
   <input type="search" id="q" placeholder="🔍 ابحث عن لعبة"><div class="chips" id="chips"></div><div class="gr" id="grid"></div></div>
  <div class="pg" id="p-store"><h1>المتجر</h1>
+  <div id="st-off" class="row bad" style="display:none">⚠ وضع الأوفلاين: المصادر الخارجية تحتاج إنترنت. يمكنك استيراد ألعابك من الهاتف في المكتبة.</div>
   <div class="row bad">⚠ حمّل فقط ألعاباً تملك حق استخدامها: مجانية أو Homebrew أو مجال عام.</div>
-  <a class="row" href="https://archive.org" target="_blank">Internet Archive<small class="sp">Homebrew والمجال العام</small><span class="ok">✓ قانوني</span></a>
-  <a class="row" href="https://itch.io/games/free/tag-retro" target="_blank">itch.io<small class="sp">ألعاب ريترو مجانية</small><span class="ok">✓ قانوني</span></a>
-  <a class="row" href="https://hh.gbdev.io" target="_blank">Homebrew Hub<small class="sp">ألعاب هواة</small><span class="ok">✓ قانوني</span></a>
-  <a class="row" href="https://pdroms.de" target="_blank">PDRoms<small class="sp">ألعاب مجانية بإذن المطورين</small><span class="ok">✓ قانوني</span></a>
-  <a class="row" href="https://www.libretro.com" target="_blank">Libretro<small class="sp">محتوى حر</small><span class="ok">✓ قانوني</span></a></div>
+  <a class="row st-ext" href="https://archive.org" target="_blank">Internet Archive<small class="sp">Homebrew والمجال العام</small><span class="ok">✓ قانوني</span></a>
+  <a class="row st-ext" href="https://itch.io/games/free/tag-retro" target="_blank">itch.io<small class="sp">ألعاب ريترو مجانية</small><span class="ok">✓ قانوني</span></a>
+  <a class="row st-ext" href="https://hh.gbdev.io" target="_blank">Homebrew Hub<small class="sp">ألعاب هواة</small><span class="ok">✓ قانوني</span></a>
+  <a class="row st-ext" href="https://pdroms.de" target="_blank">PDRoms<small class="sp">ألعاب مجانية بإذن المطورين</small><span class="ok">✓ قانوني</span></a>
+  <a class="row st-ext" href="https://www.libretro.com" target="_blank">Libretro<small class="sp">محتوى حر</small><span class="ok">✓ قانوني</span></a></div>
  <div class="pg" id="p-set"><h1>الإعدادات</h1>
+  <div class="sec">الحزمة الأوفلاين (التشغيل بلا إنترنت)</div>
+  <div class="row"><div><b>تجهيز النوى للعمل أوفلاين</b><small id="off-sum">جاري الفحص...</small></div><button class="btn sm sp" id="off-open">إدارة الحزم</button></div>
+  <div class="row"><div><b>تشخيص الأوفلاين والأداء</b><small>فحص Service Worker و Cache و SharedArrayBuffer ويد التحكم</small></div><button class="btn g sm sp" id="diag-open">تشخيص</button></div>
   <div class="sec">ملفات BIOS (ارفع نسختك الخاصة)</div><div id="bios"></div>
   <div class="sec">الأداء والمحرك</div>
   <div class="row">Threads<select id="s-th" class="sp" style="width:140px"><option value="auto">تلقائي</option><option value="on">تشغيل</option><option value="off">إيقاف</option></select></div>
-  <div class="row">إيقاف الـ Shaders (أسرع)<input type="checkbox" id="s-sh" class="sp"></div>
+  <div class="row">إيقاف الـ Shaders (أسرع لـ PSP)<input type="checkbox" id="s-sh" class="sp"></div>
   <div class="row">مسار بيانات EmulatorJS<input type="text" id="s-cdn" placeholder="https://cdn.emulatorjs.org/stable/data/"></div>
-  <div class="row">اهتزاز الأزرار<input type="checkbox" id="s-vb" class="sp"></div>
+  <div class="sec">يد التحكم واللمس</div>
+  <div class="row"><div><b>تعيين أزرار يد التحكم (P1–P4)</b><small id="gp-stat">اضغط أي زر في اليد لتفعيلها</small></div><button class="btn g sm sp" id="gp-open">تعيين</button></div>
+  <div class="row">حساسية العصا (Deadzone): <b id="dz-v">0.15</b><input type="range" id="s-dz" min="0.05" max="0.35" step="0.01" class="sp" style="width:130px"></div>
+  <div class="row">إخفاء أزرار اللمس عند توصيل يد<input type="checkbox" id="s-ah" class="sp"></div>
+  <div class="row">اهتزاز الأزرار ويد التحكم<input type="checkbox" id="s-vb" class="sp"></div>
   <div class="sec">الذكاء الاصطناعي (Gemini)</div>
   <input type="password" id="s-key" placeholder="مفتاح Gemini API (يُحفظ على جهازك فقط)"><input type="text" id="s-mod" placeholder="النموذج: gemini-2.5-flash">
   <div class="sec">حول</div><div class="row" id="inf" style="font-size:12px;direction:ltr"></div>
@@ -74,156 +99,565 @@ input[type=text],input[type=search],input[type=password],textarea,select{width:1
 <div class="nav"><b data-t="lib" class="on">المكتبة</b><b data-t="store">المتجر</b><b data-t="set">الإعدادات</b></div>
 <div id="sheet"><div id="shc"></div></div>
 <input type="file" id="fi" multiple hidden><input type="file" id="fb" hidden>
-<div id="pl"><div id="bar"><b id="bk">✕</b><span id="tt"></span><b id="rot">⟳</b></div>
+<div id="pl">
+ <div id="bar"><b id="bk">✕</b><span id="tt"></span><span id="gpbadge"></span><b id="ps">⏸</b><b id="rot">⟳</b></div>
  <div id="scr"><iframe id="fr" allow="autoplay; fullscreen; gamepad; cross-origin-isolated"></iframe>
   <div id="ld"><div>⏳</div><div id="ldt">جاري تشغيل النواة...</div></div>
-  <div id="err"><h1 style="font-size:20px">فشل التشغيل</h1><div id="why"></div><pre id="log"></pre><div style="display:flex;gap:8px;flex-wrap:wrap">
-  <button class="btn" id="e-re">إعادة المحاولة</button><button class="btn g" id="e-cdn">تبديل الـ CDN</button><button class="btn g" id="e-nt">بدون Threads</button><button class="btn g" id="e-ai">اشرح بالذكاء الاصطناعي</button></div><div id="ai" style="font-size:13px;line-height:1.7"></div></div></div>
- <div id="pad"></div></div>
+  <div id="err"><h1 style="font-size:19px">فشل التشغيل</h1><div id="why"></div><pre id="log"></pre>
+   <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button class="btn" id="e-re">إعادة المحاولة</button>
+    <button class="btn g" id="e-cdn">تبديل الـ CDN</button>
+    <button class="btn g" id="e-nt">بدون Threads</button>
+    <button class="btn g" id="e-off">فتح الحزمة الأوفلاين</button>
+    <button class="btn g" id="e-ai">اشرح بالذكاء الاصطناعي</button>
+   </div>
+   <div id="ai" style="font-size:13px;line-height:1.7"></div>
+  </div>
+ </div>
+ <div id="pad"></div>
+</div>
 <script>
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
-// ===== النظام والنوى =====
-const SYS={nes:['NES','nes','Nintendo_-_Nintendo_Entertainment_System'],snes:['SNES','snes','Nintendo_-_Super_Nintendo_Entertainment_System'],gb:['GB','gb','Nintendo_-_Game_Boy'],gbc:['GBC','gb','Nintendo_-_Game_Boy_Color'],gba:['GBA','gba','Nintendo_-_Game_Boy_Advance'],nds:['NDS','nds','Nintendo_-_Nintendo_DS'],n64:['N64','n64','Nintendo_-_Nintendo_64'],md:['Genesis','segaMD','Sega_-_Mega_Drive_-_Genesis'],sms:['SMS','segaMS','Sega_-_Master_System_-_Mark_III'],gg:['GG','segaGG','Sega_-_Game_Gear'],psx:['PS1','psx','Sony_-_PlayStation'],psp:['PSP','psp','Sony_-_PlayStation_Portable'],pce:['PCE','pce','NEC_-_PC_Engine_-_TurboGrafx_16'],arc:['Arcade','arcade','']};
+// ===== الأنظمة والنوى =====
+const SYS={
+  nes:['NES','nes','Nintendo_-_Nintendo_Entertainment_System','~2.2 MB'],
+  snes:['SNES','snes','Nintendo_-_Super_Nintendo_Entertainment_System','~3.5 MB'],
+  gba:['GBA','gba','Nintendo_-_Game_Boy_Advance','~3.5 MB'],
+  gbc:['GBC','gb','Nintendo_-_Game_Boy_Color','~2.2 MB'],
+  gb:['GB','gb','Nintendo_-_Game_Boy','~2.2 MB'],
+  nds:['NDS','nds','Nintendo_-_Nintendo_DS','~7.5 MB'],
+  n64:['N64','n64','Nintendo_-_Nintendo_64','~14 MB'],
+  md:['Genesis','segaMD','Sega_-_Mega_Drive_-_Genesis','~3.5 MB'],
+  sms:['SMS','segaMS','Sega_-_Master_System_-_Mark_III','~2.2 MB'],
+  gg:['GG','segaGG','Sega_-_Game_Gear','~2.2 MB'],
+  psx:['PS1','psx','Sony_-_PlayStation','~8.5 MB'],
+  psp:['PSP','psp','Sony_-_PlayStation_Portable','~28 MB'],
+  pce:['PCE','pce','NEC_-_PC_Engine_-_TurboGrafx_16','~3.5 MB'],
+  arc:['Arcade','arcade','','~12 MB']
+};
 const EXT={nes:'nes',fds:'nes',sfc:'snes',smc:'snes',gb:'gb',gbc:'gbc',gba:'gba',nds:'nds',z64:'n64',n64:'n64',v64:'n64',md:'md',gen:'md',smd:'md',sms:'sms',gg:'gg',cue:'psx',bin:'psx',img:'psx',chd:'psx',pbp:'psp',cso:'psp',iso:'psp',pce:'pce',zip:'arc','7z':'arc'};
-const BIOSN={psx:'PS1 (scph5501.bin)',gba:'GBA (gba_bios.bin)',nds:'NDS (bios7/bios9/firmware في zip)',md:'Sega CD',pce:'PC Engine CD (syscard3)',arc:'Neo Geo (neogeo.zip)',ps2:'PS2 — قريباً'};
+const BIOSN={psx:'PS1 (scph5501.bin)',gba:'GBA (gba_bios.bin)',nds:'NDS (bios7/bios9/firmware في zip)',md:'Sega CD',pce:'PC Engine CD (syscard3)',arc:'Neo Geo (neogeo.zip)'};
 const CDNS=['https://cdn.emulatorjs.org/stable/data/','https://cdn.jsdelivr.net/gh/EmulatorJS/EmulatorJS@main/data/'];
-// ===== التخزين =====
-let DB;const idb=()=>new Promise((ok,no)=>{const r=indexedDB.open('rv',1);r.onupgradeneeded=()=>{['roms','bios','meta'].forEach(s=>r.result.createObjectStore(s,{keyPath:'id'}))};r.onsuccess=()=>{DB=r.result;ok()};r.onerror=()=>no(r.error)});
+const EJS_CACHE='ejs-v1';
+
+// ===== التخزين IndexedDB v2 (ترقية غير مدمّرة تحافظ على الألعاب والـ BIOS وcheat.db) =====
+let DB;
+const idb=()=>new Promise((ok,no)=>{
+  const r=indexedDB.open('rv',2);
+  r.onupgradeneeded=()=>{
+    const db=r.result;
+    ['roms','bios','meta','covers'].forEach(s=>{if(!db.objectStoreNames.contains(s))db.createObjectStore(s,{keyPath:'id'})});
+  };
+  r.onsuccess=()=>{DB=r.result;ok()};
+  r.onerror=()=>no(r.error);
+});
 const tx=(s,m,f)=>new Promise((ok,no)=>{const t=DB.transaction(s,m),o=f(t.objectStore(s));t.oncomplete=()=>ok(o&&o.result);t.onerror=()=>no(t.error)});
 const dbAll=s=>tx(s,'readonly',o=>o.getAll()),dbGet=(s,k)=>tx(s,'readonly',o=>o.get(k)),dbPut=(s,v)=>tx(s,'readwrite',o=>o.put(v)),dbDel=(s,k)=>tx(s,'readwrite',o=>o.delete(k));
-const CF=JSON.parse(localStorage.rvcfg||'{}');const save=()=>localStorage.rvcfg=JSON.stringify(CF);
-let games=[],filt='all';
-// ===== الواجهة =====
+const CF=JSON.parse(localStorage.rvcfg||'{}');
+if(CF['s-ah']===undefined)CF['s-ah']=true;
+if(CF['s-dz']===undefined)CF['s-dz']=0.15;
+const save=()=>localStorage.rvcfg=JSON.stringify(CF);
+const getOfflineMeta=()=>JSON.parse(localStorage.rv_off_meta||'{}');
+const setOfflineMeta=m=>{localStorage.rv_off_meta=JSON.stringify(m)};
+
+let games=[],filt='all',coverUrls={};
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const clean=n=>n.replace(/\.[^.]+$/,'').replace(/\s*[\(\[].*?[\)\]]/g,'').trim();
 function art(g){const h=[...g.name].reduce((a,c)=>a+c.charCodeAt(0),0)%360;return `linear-gradient(150deg,hsl(${h},70%,30%),hsl(${(h+60)%360},80%,55%))`}
-async function load(){games=await dbAll('roms');render()}
-function render(){const q=$('#q').value.toLowerCase(),ks=[...new Set(games.map(g=>g.sys))];
- $('#chips').innerHTML=['all',...ks].map(k=>`<span class="${filt==k?'on':''}" data-f="${k}">${k=='all'?'الكل':SYS[k][0]}</span>`).join('');
- const L=games.filter(g=>(filt=='all'||g.sys==filt)&&g.name.toLowerCase().includes(q)).sort((a,b)=>(b.last||0)-(a.last||0));
- $('#grid').innerHTML=L.length?L.map(g=>`<div class="cd"><div class="cv" data-p="${g.id}" style="background-image:${g.cover?`url('${g.cover}'),`:''}${art(g)}"><i>${SYS[g.sys][0]}</i></div><div class="mn" data-m="${g.id}">⋯</div><p>${esc(clean(g.name))}</p></div>`).join(''):'<div class="row">لا توجد ألعاب بعد. اضغط ＋ استيراد وأضف ألعابك من الهاتف.</div>';
- $('#bios').innerHTML=Object.keys(BIOSN).map(k=>`<div class="row"><div>${BIOSN[k]}<small id="b-${k}">غير موجود</small></div>${k=='ps2'?'':`<button class="btn g sp" data-b="${k}">رفع</button>`}</div>`).join('');
- dbAll('bios').then(a=>a.forEach(b=>{const e=$('#b-'+b.id);if(e){e.className='ok';e.textContent='✓ '+b.fname+' · '+(b.blob.size/1024|0)+'KB'}}))}
+
+// تحديث حالة الأوفلاين فوراً في الشريط العلوي والمتجر والذكاء الاصطناعي
+function syncOnlineUI(){
+  const on=navigator.onLine!==false;
+  $('#offbar').classList.toggle('on',!on);
+  $('#st-off').style.display=on?'none':'flex';
+  $$('.st-ext').forEach(a=>a.classList.toggle('dis',!on));
+  updateOfflineSummary();
+}
+addEventListener('online',syncOnlineUI);
+addEventListener('offline',syncOnlineUI);
+
+async function cacheCoverBlob(gameId,url){
+  if(!url||!navigator.onLine)return;
+  try{
+    const r=await fetch(url,{mode:'cors',credentials:'omit'});
+    if(r.ok){
+      const blob=await r.blob();
+      await dbPut('covers',{id:gameId,blob});
+      if(coverUrls[gameId])URL.revokeObjectURL(coverUrls[gameId]);
+      coverUrls[gameId]=URL.createObjectURL(blob);
+    }
+  }catch(_){}
+}
+
+async function load(){
+  games=await dbAll('roms');
+  const covs=await dbAll('covers');
+  Object.values(coverUrls).forEach(u=>{try{URL.revokeObjectURL(u)}catch(_){}});
+  coverUrls={};
+  covs.forEach(c=>{if(c.blob)coverUrls[c.id]=URL.createObjectURL(c.blob)});
+  render();
+}
+
+function render(){
+  const q=$('#q').value.toLowerCase(),ks=[...new Set(games.map(g=>g.sys))];
+  $('#chips').innerHTML=['all',...ks].map(k=>`<span class="${filt==k?'on':''}" data-f="${k}">${k=='all'?'الكل':SYS[k][0]}</span>`).join('');
+  const L=games.filter(g=>(filt=='all'||g.sys==filt)&&g.name.toLowerCase().includes(q)).sort((a,b)=>(b.last||0)-(a.last||0));
+  $('#grid').innerHTML=L.length?L.map(g=>{
+    const localCov=coverUrls[g.id];
+    const onlineCov=(navigator.onLine&&g.cover)?g.cover:'';
+    const bg=localCov?`url('${localCov}'),${art(g)}`:(onlineCov?`url('${onlineCov}'),${art(g)}`:art(g));
+    return `<div class="cd"><div class="cv" data-p="${g.id}" style="background-image:${bg}"><i>${SYS[g.sys][0]}</i></div><div class="mn" data-m="${g.id}">⋯</div><p>${esc(clean(g.name))}</p></div>`;
+  }).join(''):'<div class="row">لا توجد ألعاب بعد. اضغط ＋ استيراد وأضف ألعابك من الهاتف.</div>';
+  $('#bios').innerHTML=Object.keys(BIOSN).map(k=>`<div class="row"><div>${BIOSN[k]}<small id="b-${k}">غير موجود</small></div><button class="btn g sp" data-b="${k}">رفع</button></div>`).join('');
+  dbAll('bios').then(a=>a.forEach(b=>{const e=$('#b-'+b.id);if(e){e.className='ok';e.textContent='✓ '+b.fname+' · '+(b.blob.size/1024|0)+'KB'}}));
+}
 $('#q').oninput=render;
-document.addEventListener('click',e=>{const t=e.target.closest('[data-t],[data-f],[data-p],[data-m],[data-b]');if(!t)return;const d=t.dataset;
- if(d.t){$$('.pg').forEach(p=>p.classList.toggle('on',p.id=='p-'+d.t));$$('.nav b').forEach(b=>b.classList.toggle('on',b==t))}
- if(d.f){filt=d.f;render()}if(d.p)play(d.p);if(d.m)menu(d.m);
- if(d.b){fb._k=d.b;fb.click()}});
+
+document.addEventListener('click',e=>{
+  resumeTrackedAudio();
+  const t=e.target.closest('[data-t],[data-f],[data-p],[data-m],[data-b]');if(!t)return;const d=t.dataset;
+  if(d.t){$$('.pg').forEach(p=>p.classList.toggle('on',p.id=='p-'+d.t));$$('.nav b').forEach(b=>b.classList.toggle('on',b==t))}
+  if(d.f){filt=d.f;render()}
+  if(d.p)play(d.p);
+  if(d.m)menu(d.m);
+  if(d.b){fb._k=d.b;fb.click()}
+});
 const fb=$('#fb');fb.onchange=async()=>{const f=fb.files[0];if(f){await dbPut('bios',{id:fb._k,fname:f.name,blob:f});render()}fb.value=''};
 $('#imp').onclick=()=>$('#fi').click();
-$('#fi').onchange=async e=>{let fs=[...e.target.files];const cue=fs.filter(f=>/\.cue$/i.test(f.name));
- for(const f of fs){const x=f.name.split('.').pop().toLowerCase();if(cue.length&&x=='bin')continue;const sys=EXT[x];if(!sys)continue;
-  await dbPut('roms',{id:Date.now()+Math.random().toString(36).slice(2,6),name:f.name,sys,blob:f,cover:'',last:0})}
- e.target.value='';await load();toast('تم الاستيراد. غيّر النظام من ⋯ إن كان غير صحيح (ISO/ZIP).')};
-function toast(m){const d=document.createElement('div');d.className='row';d.style.cssText='position:fixed;top:20px;left:16px;right:16px;z-index:99';d.textContent=m;document.body.appendChild(d);setTimeout(()=>d.remove(),3500)}
-const sheet=h=>{$('#shc').innerHTML=h;$('#sheet').classList.add('on')};$('#sheet').onclick=e=>{if(e.target.id=='sheet')e.target.classList.remove('on')};
-// ===== قائمة اللعبة: غلاف + نظام + غش =====
+$('#fi').onchange=async e=>{
+  let fs=[...e.target.files];const cue=fs.filter(f=>/\.cue$/i.test(f.name));
+  for(const f of fs){
+    const x=f.name.split('.').pop().toLowerCase();
+    if(cue.length&&x=='bin')continue;
+    const sys=EXT[x];if(!sys)continue;
+    await dbPut('roms',{id:Date.now()+Math.random().toString(36).slice(2,6),name:f.name,sys,blob:f,cover:'',last:0});
+  }
+  e.target.value='';await load();toast('تم الاستيراد بنجاح.');
+};
+function toast(m){const d=document.createElement('div');d.className='row';d.style.cssText='position:fixed;top:24px;left:16px;right:16px;z-index:99;background:#171A25f2';d.textContent=m;document.body.appendChild(d);setTimeout(()=>d.remove(),3400)}
+const sheet=h=>{$('#shc').innerHTML=h;$('#sheet').classList.add('on')};
+$('#sheet').onclick=e=>{if(e.target.id=='sheet')$('#sheet').classList.remove('on')};
+
+// ===== قائمة اللعبة: غلاف (مع كاش أوفلاين) + نظام + غش =====
 function ghRaw(u){return u.replace(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/(.+)$/,'https://raw.githubusercontent.com/$1/$2/$3')}
 const imgOk=u=>new Promise(r=>{const i=new Image();i.crossOrigin='anonymous';i.onload=()=>r(true);i.onerror=()=>r(false);i.src=u});
-async function autoCover(g){const repo=SYS[g.sys][2];if(!repo)return false;const n=clean(g.name).replace(/[&*\/:`<>?\\|]/g,'_');
- for(const d of ['Named_Boxarts','Named_Titles','Named_Snaps']){const u=`https://raw.githubusercontent.com/libretro-thumbnails/${repo}/master/${d}/${encodeURIComponent(n)}.png`;if(await imgOk(u)){g.cover=u;await dbPut('roms',g);return true}}return false}
-function menu(id){const g=games.find(x=>x.id==id);
- sheet(`<h1 style="font-size:20px">${esc(clean(g.name))}</h1>
- <div class="sec">الغلاف</div><input type="text" id="cu" placeholder="رابط صورة أو رابط GitHub" value="${esc(g.cover||'')}">
- <div style="display:flex;gap:8px;margin:8px 0"><button class="btn" id="c1">حفظ الرابط</button><button class="btn g" id="c2">تنزيل تلقائي</button><button class="btn g" id="c3">من الهاتف</button></div>
- <div class="sec">النظام</div><select id="sy">${Object.keys(SYS).map(k=>`<option value="${k}" ${k==g.sys?'selected':''}>${SYS[k][0]}</option>`).join('')}</select>
- <div class="sec">الغش</div><div id="chl"></div>
- <input type="text" id="cn" placeholder="اسم الغش"><input type="text" id="cc" placeholder="الكود (GameShark / Game Genie / Action Replay)">
- <div style="display:flex;gap:8px;margin:8px 0"><button class="btn" id="ca">إضافة</button><button class="btn g" id="cdb">رفع cheat.db (PSP)</button><button class="btn g" id="cs">بحث في cheat.db</button></div><div id="chr"></div>
- <div style="display:flex;gap:8px;margin-top:14px"><button class="btn g" id="fav">${g.fav?'★ إزالة من المفضلة':'☆ مفضلة'}</button><button class="btn g" id="del" style="color:#F43F5E">حذف</button></div>`);
- const ch=()=>JSON.parse(localStorage['ch'+id]||'[]'),sc=a=>{localStorage['ch'+id]=JSON.stringify(a);lc()};
- const lc=()=>{$('#chl').innerHTML=ch().map((c,i)=>`<div class="row"><div>${esc(c.n)}<small style="direction:ltr">${esc(c.c.slice(0,60))}</small></div><input class="sp" type="checkbox" data-i="${i}" ${c.on?'checked':''}></div>`).join('')||'<small style="color:#8A90A8">لا غش مضاف</small>';
-  $$('#chl input').forEach(x=>x.onchange=()=>{const a=ch();a[x.dataset.i].on=x.checked;sc(a)})};lc();
- $('#c1').onclick=async()=>{g.cover=ghRaw($('#cu').value.trim());await dbPut('roms',g);render();toast('تم حفظ الغلاف')};
- $('#c2').onclick=async()=>{toast('جاري البحث...');toast(await autoCover(g)?'تم تنزيل الغلاف':'لم يُعثر على غلاف، جرّب رابطاً يدوياً');render()};
- $('#c3').onclick=()=>{const i=document.createElement('input');i.type='file';i.accept='image/*';i.onchange=()=>{const r=new FileReader();r.onload=async()=>{g.cover=r.result;await dbPut('roms',g);render()};r.readAsDataURL(i.files[0])};i.click()};
- $('#sy').onchange=async e=>{g.sys=e.target.value;await dbPut('roms',g);render()};
- $('#ca').onclick=()=>{const n=$('#cn').value.trim(),c=$('#cc').value.trim();if(n&&c){const a=ch();a.push({n,c,on:true});sc(a);$('#cn').value=$('#cc').value=''}};
- $('#cdb').onclick=()=>{const i=document.createElement('input');i.type='file';i.onchange=async()=>{await dbPut('meta',{id:'cheatdb',text:await i.files[0].text()});toast('تم حفظ cheat.db')};i.click()};
- $('#cs').onclick=async()=>{const m=await dbGet('meta','cheatdb');if(!m)return toast('ارفع cheat.db أولاً');const db=parseDb(m.text),k=clean(g.name).toLowerCase();
-  const hit=db.filter(x=>x.g.toLowerCase().includes(k)||k.includes(x.g.toLowerCase())).slice(0,3);
-  $('#chr').innerHTML=hit.length?hit.map((x,xi)=>`<div class="sec">${esc(x.g)}</div>`+x.c.map((c,ci)=>`<div class="row" data-add="${xi}.${ci}">${esc(c.n)}<button class="btn g sp">＋</button></div>`).join('')).join(''):'لا نتائج لهذه اللعبة';
-  $$('#chr [data-add]').forEach(el=>el.onclick=()=>{const[a,b]=el.dataset.add.split('.'),c=hit[a].c[b],x=ch();x.push({n:c.n,c:c.l.join('\n'),on:true});sc(x)})};
- $('#fav').onclick=async()=>{g.fav=!g.fav;await dbPut('roms',g);$('#sheet').classList.remove('on')};
- $('#del').onclick=async()=>{if(confirm('حذف اللعبة؟')){await dbDel('roms',g.id);$('#sheet').classList.remove('on');load()}}}
-// محلل cheat.db بصيغة PPSSPP
+async function autoCover(g){
+  if(!navigator.onLine){toast('تحتاج إنترنت لجلب الأغلفة');return false}
+  const repo=SYS[g.sys][2];if(!repo)return false;
+  const n=clean(g.name).replace(/[&*\/:`<>?\\|]/g,'_');
+  for(const d of ['Named_Boxarts','Named_Titles','Named_Snaps']){
+    const u=`https://raw.githubusercontent.com/libretro-thumbnails/${repo}/master/${d}/${encodeURIComponent(n)}.png`;
+    if(await imgOk(u)){g.cover=u;await dbPut('roms',g);await cacheCoverBlob(g.id,u);return true}
+  }
+  return false;
+}
+function menu(id){
+  const g=games.find(x=>x.id==id);if(!g)return;
+  const online=navigator.onLine!==false;
+  sheet(`<h1 style="font-size:19px">${esc(clean(g.name))}</h1>
+  <div class="sec">الغلاف</div><input type="text" id="cu" placeholder="رابط صورة أو رابط GitHub" value="${esc(g.cover||'')}">
+  <div style="display:flex;gap:8px;margin:8px 0;flex-wrap:wrap"><button class="btn" id="c1">حفظ الرابط</button><button class="btn g" id="c2" ${online?'':'disabled'}>${online?'تنزيل تلقائي':'تحتاج إنترنت'}</button><button class="btn g" id="c3">من الهاتف</button></div>
+  <div class="sec">النظام</div><select id="sy">${Object.keys(SYS).map(k=>`<option value="${k}" ${k==g.sys?'selected':''}>${SYS[k][0]}</option>`).join('')}</select>
+  <div class="sec">الغش</div><div id="chl"></div>
+  <input type="text" id="cn" placeholder="اسم الغش"><input type="text" id="cc" placeholder="الكود (GameShark / Game Genie / CWCheat)">
+  <div style="display:flex;gap:8px;margin:8px 0;flex-wrap:wrap"><button class="btn" id="ca">إضافة</button><button class="btn g" id="cdb">رفع cheat.db (PSP)</button><button class="btn g" id="cs">بحث في cheat.db</button></div><div id="chr"></div>
+  <div style="display:flex;gap:8px;margin-top:14px"><button class="btn g" id="fav">${g.fav?'★ إزالة من المفضلة':'☆ مفضلة'}</button><button class="btn g" id="del" style="color:var(--err)">حذف</button></div>`);
+  const ch=()=>JSON.parse(localStorage['ch'+id]||'[]'),sc=a=>{localStorage['ch'+id]=JSON.stringify(a);lc()};
+  const lc=()=>{$('#chl').innerHTML=ch().map((c,i)=>`<div class="row"><div>${esc(c.n)}<small style="direction:ltr">${esc(c.c.slice(0,60))}</small></div><input class="sp" type="checkbox" data-i="${i}" ${c.on?'checked':''}></div>`).join('')||'<small style="color:#8A90A8">لا غش مضاف</small>';
+   $$('#chl input').forEach(x=>x.onchange=()=>{const a=ch();a[x.dataset.i].on=x.checked;sc(a)})};lc();
+  $('#c1').onclick=async()=>{const u=ghRaw($('#cu').value.trim());g.cover=u;await dbPut('roms',g);await cacheCoverBlob(g.id,u);render();toast('تم حفظ الغلاف')};
+  $('#c2').onclick=async()=>{toast('جاري البحث...');toast(await autoCover(g)?'تم تنزيل الغلاف وتخزينه للأوفلاين':'لم يُعثر على غلاف، جرّب رابطاً يدوياً');render()};
+  $('#c3').onclick=()=>{const i=document.createElement('input');i.type='file';i.accept='image/*';i.onchange=()=>{const r=new FileReader();r.onload=async()=>{g.cover=r.result;await dbPut('roms',g);await dbPut('covers',{id:g.id,blob:i.files[0]});load();toast('تم حفظ الغلاف محلياً')};r.readAsDataURL(i.files[0])};i.click()};
+  $('#sy').onchange=async e=>{g.sys=e.target.value;await dbPut('roms',g);render()};
+  $('#ca').onclick=()=>{const n=$('#cn').value.trim(),c=$('#cc').value.trim();if(n&&c){const a=ch();a.push({n,c,on:true});sc(a);$('#cn').value=$('#cc').value=''}};
+  $('#cdb').onclick=()=>{const i=document.createElement('input');i.type='file';i.onchange=async()=>{await dbPut('meta',{id:'cheatdb',text:await i.files[0].text()});toast('تم حفظ cheat.db')};i.click()};
+  $('#cs').onclick=async()=>{const m=await dbGet('meta','cheatdb');if(!m)return toast('ارفع cheat.db أولاً');const db=parseDb(m.text),k=clean(g.name).toLowerCase();
+   const hit=db.filter(x=>x.g.toLowerCase().includes(k)||k.includes(x.g.toLowerCase())).slice(0,3);
+   $('#chr').innerHTML=hit.length?hit.map((x,xi)=>`<div class="sec">${esc(x.g)}</div>`+x.c.map((c,ci)=>`<div class="row" data-add="${xi}.${ci}">${esc(c.n)}<button class="btn g sp">＋</button></div>`).join('')).join(''):'لا نتائج لهذه اللعبة';
+   $$('#chr [data-add]').forEach(el=>el.onclick=()=>{const[a,b]=el.dataset.add.split('.'),c=hit[a].c[b],x=ch();x.push({n:c.n,c:c.l.join('\n'),on:true});sc(x)})};
+  $('#fav').onclick=async()=>{g.fav=!g.fav;await dbPut('roms',g);$('#sheet').classList.remove('on')};
+  $('#del').onclick=async()=>{if(confirm('حذف اللعبة؟')){await dbDel('roms',g.id);await dbDel('covers',g.id).catch(()=>{});$('#sheet').classList.remove('on');load()}};
+}
 function parseDb(t){const out=[];let cur=null,c=null;for(const raw of t.split(/\r?\n/)){const l=raw.trim();
- if(l.startsWith('_S')){cur={id:l.slice(2).trim(),g:'',c:[]};out.push(cur)}else if(l.startsWith('_G')&&cur)cur.g=l.slice(2).trim();
- else if(/^_C\d/.test(l)&&cur){c={n:l.slice(3).trim(),l:[]};cur.c.push(c)}else if(l.startsWith('_L')&&c)c.l.push(l.slice(2).trim())}return out}
+  if(l.startsWith('_S')){cur={id:l.slice(2).trim(),g:'',c:[]};out.push(cur)}else if(l.startsWith('_G')&&cur)cur.g=l.slice(2).trim();
+  else if(/^_C\d/.test(l)&&cur){c={n:l.slice(3).trim(),l:[]};cur.c.push(c)}else if(l.startsWith('_L')&&c)c.l.push(l.slice(2).trim())}return out}
+
 // ===== الإعدادات =====
 ['s-th','s-cdn','s-key','s-mod'].forEach(i=>{const e=$('#'+i);e.value=CF[i]||(i=='s-th'?'auto':'');e.onchange=()=>{CF[i]=e.value;save()}});
-['s-sh','s-vb'].forEach(i=>{const e=$('#'+i);e.checked=!!CF[i];e.onchange=()=>{CF[i]=e.checked;save()}});
-// ===== التشغيل (إصلاح الشاشة السوداء) =====
-let cur=null,wd=0,logs=[],cdnI=0,noTh=false,started=false;
-const iso=()=>self.crossOriginIsolated===true;
+['s-sh','s-vb','s-ah'].forEach(i=>{const e=$('#'+i);e.checked=!!CF[i];e.onchange=()=>{CF[i]=e.checked;save()}});
+$('#s-dz').value=CF['s-dz'];$('#dz-v').textContent=Number(CF['s-dz']).toFixed(2);
+$('#s-dz').oninput=e=>{CF['s-dz']=parseFloat(e.target.value);$('#dz-v').textContent=CF['s-dz'].toFixed(2);save()};
+
+// ===== طبقة 3 + 2 الأوفلاين: التحقق من الحزم + التجهيز المخفي + التشخيص =====
+const iso=()=>self.crossOriginIsolated===true&&typeof SharedArrayBuffer!=='undefined';
 function thr(){const m=CF['s-th']||'auto';return !noTh&&(m=='on'||(m=='auto'&&iso()))}
-async function play(id){const g=games.find(x=>x.id==id);cur=g;g.last=Date.now();dbPut('roms',g);await start()}
-async function start(){const g=cur;logs=[];started=false;$('#err').classList.remove('on');$('#ld').style.display='flex';$('#ldt').textContent='جاري تشغيل نواة '+SYS[g.sys][0]+'...';
- $('#pl').classList.add('on');$('#tt').textContent=clean(g.name);buildPad(g.sys);
- const b=await dbGet('bios',g.sys),path=CF['s-cdn']?CF['s-cdn'].replace(/\/?$/,'/'):CDNS[cdnI%CDNS.length];
- const cheats=JSON.parse(localStorage['ch'+g.id]||'[]').filter(c=>c.on).map(c=>[c.n,c.c]);
- if(g.sys=='psp'&&!iso()&&!noTh)logs.push('تنبيه: PSP يحتاج Threads (crossOriginIsolated=false). افتح التطبيق عبر رابط https على GitHub Pages.');
- window.__launch={core:SYS[g.sys][1],rom:URL.createObjectURL(g.blob),name:clean(g.name),path,bios:b?URL.createObjectURL(b.blob):'',cheats,threads:thr(),opts:{'virtual-gamepad':'disabled',...(CF['s-sh']?{shader:'disabled'}:{})}};
- // iframe جديد لكل لعبة + ضبط المتغيرات قبل تحميل loader.js
- const fr=$('#fr');fr.srcdoc=`<!doctype html><html><body style="margin:0;background:#000;height:100vh"><div id="game" style="width:100%;height:100%"></div><style>.ejs_virtualGamepad_parent{display:none!important}</style><script>
+async function hasEmbeddedLocal(){
+  try{const r=await fetch('./ejs/data/loader.js',{method:'HEAD'});return r.ok}catch(_){return false}
+}
+async function resolveDataBase(){
+  if(CF['s-cdn']&&CF['s-cdn'].trim())return CF['s-cdn'].replace(/\/?$/,'/');
+  if(await hasEmbeddedLocal())return new URL('./ejs/data/',location.href).href;
+  return CDNS[cdnI%CDNS.length];
+}
+function updateOfflineSummary(){
+  const m=getOfflineMeta();
+  const readyCount=Object.keys(SYS).filter(k=>m[k]&&m[k].ready).length;
+  $('#off-sum').textContent=readyCount+' / '+Object.keys(SYS).length+' أنظمة جاهزة للأوفلاين';
+}
+function tinyDummyRom(sysKey){
+  if(sysKey=='gba'){const b=new Uint8Array(256);b[0]=0x2E;b[3]=0xEA;b[0xB2]=0x96;return b}
+  if(sysKey=='nes'){const b=new Uint8Array(16+16384+8192);b[0]=0x4E;b[1]=0x45;b[2]=0x53;b[3]=0x1A;b[4]=1;b[5]=1;return b}
+  return new Uint8Array(1024);
+}
+function isSysPreparedOffline(sysKey,needThreads){
+  const m=getOfflineMeta()[sysKey];
+  return !!(m&&m.ready&&(needThreads===undefined||m.threads===needThreads));
+}
+
+// حقن معترض Fetch + XHR + DOM قبل تحميل loader.js لخدمة الطلبات من Cache Storage ('ejs-v1')
+const IN_IFRAME_NET_INTERCEPTOR=`(function(){
+  const EJS_CACHE='ejs-v1';
+  const isCdn=u=>u&&(u.includes('cdn.emulatorjs.org')||u.includes('cdn.jsdelivr.net/gh/EmulatorJS/'));
+  const skipCache=u=>u&&(u.includes('cores/reports/')||u.endsWith('.map'));
+  const origFetch=window.fetch.bind(window);
+  window.fetch=async function(inp,init){
+    const url=typeof inp==='string'?inp:(inp&&inp.url)||'';
+    if(isCdn(url)&&!skipCache(url)){
+      try{
+        const cache=await caches.open(EJS_CACHE);
+        const hit=await cache.match(url);
+        if(hit)return hit.clone();
+        const res=await origFetch(url,{mode:'cors',credentials:'omit'});
+        if(res&&res.ok)try{await cache.put(url,res.clone())}catch(_){}
+        return res;
+      }catch(e){return origFetch(inp,init)}
+    }
+    return origFetch(inp,init);
+  };
+  const origAppend=Node.prototype.appendChild;
+  Node.prototype.appendChild=function(el){
+    if(el&&el.tagName==='SCRIPT'&&el.src&&isCdn(el.src)){
+      const u=el.src;
+      caches.open(EJS_CACHE).then(c=>c.match(u)).then(async r=>{
+        if(r){const txt=await r.text();const ns=document.createElement('script');ns.textContent=txt;return origAppend.call(this,ns)}
+        origAppend.call(this,el);
+      }).catch(()=>origAppend.call(this,el));
+      return el;
+    }
+    return origAppend.call(this,el);
+  };
+})();`;
+
+let prepAbort=null;
+function openOfflineManager(){
+  const meta=getOfflineMeta();
+  const rows=Object.keys(SYS).map(k=>{
+    const m=meta[k],s=SYS[k];
+    const badge=m&&m.ready?`<span class="ok">جاهز للأوفلاين ✓</span>`:`<span class="bad">غير محمّل</span>`;
+    return `<div class="row"><div><b>${s[0]}</b><small>${s[3]} · ${badge}</small></div>
+      <div class="sp" style="display:flex;gap:6px">
+        <button class="btn sm" data-pk="${k}">${m&&m.ready?'تحديث':'تجهيز للأوفلاين'}</button>
+        ${m&&m.ready?`<button class="btn g sm" data-dp="${k}">حذف</button>`:''}
+      </div></div>`;
+  }).join('');
+  sheet(`<h1>إدارة الحزمة الأوفلاين</h1>
+    <div class="row" style="flex-direction:column;align-items:stretch">
+      <div id="off-p-txt" style="font-size:13px">اختر نظاماً لتجهيزه أو اضغط "تجهيز الكل" قبل قطع الإنترنت.</div>
+      <div class="prog"><div id="off-p-bar"></div></div>
+      <div style="display:flex;gap:8px;margin-top:4px"><button class="btn" id="off-all">تجهيز الكل</button><button class="btn g" id="off-clr" style="color:var(--err)">حذف الكل</button></div>
+    </div>${rows}`);
+  $('#off-all').onclick=async()=>{
+    if(!navigator.onLine)return toast('تجهيز الحزم يحتاج إنترنت');
+    const pend=Object.keys(SYS).filter(k=>!getOfflineMeta()[k]?.ready);
+    if(!pend.length)return toast('جميع الأنظمة جاهزة بالفعل ✓');
+    for(let i=0;i<pend.length;i++){
+      $('#off-p-txt').textContent=`جاري تجهيز ${SYS[pend[i]][0]} (${i+1}/${pend.length})...`;
+      $('#off-p-bar').style.width=Math.round((i/pend.length)*100)+'%';
+      await prewarmCore(pend[i]);
+    }
+    $('#off-p-bar').style.width='100%';
+    openOfflineManager();toast('اكتمل تجهيز جميع الحزم للأوفلاين ✓');
+  };
+  $('#off-clr').onclick=async()=>{
+    await caches.delete(EJS_CACHE).catch(()=>{});
+    setOfflineMeta({});updateOfflineSummary();openOfflineManager();toast('تم مسح الكاش الأوفلاين');
+  };
+  $$('#shc [data-pk]').forEach(b=>b.onclick=async()=>{
+    if(!navigator.onLine)return toast('تجهيز الحزمة يحتاج إنترنت');
+    const k=b.dataset.pk;b.disabled=true;
+    $('#off-p-txt').textContent=`جاري تجهيز نواة ${SYS[k][0]}...`;
+    $('#off-p-bar').style.width='45%';
+    const ok=await prewarmCore(k);
+    $('#off-p-bar').style.width=ok?'100%':'0%';
+    openOfflineManager();toast(ok?`تم تجهيز ${SYS[k][0]} للأوفلاين ✓`:`تعذر تجهيز ${SYS[k][0]}`);
+  });
+  $$('#shc [data-dp]').forEach(b=>b.onclick=()=>{const m=getOfflineMeta();delete m[b.dataset.dp];setOfflineMeta(m);updateOfflineSummary();openOfflineManager()});
+}
+$('#off-open').onclick=openOfflineManager;
+
+function prewarmCore(sysKey){
+  return new Promise(async resolve=>{
+    const core=SYS[sysKey][1],path=await resolveDataBase(),threads=(sysKey=='psp')?(CF['s-th']!='off'&&iso()):thr();
+    const romUrl=URL.createObjectURL(new Blob([tinyDummyRom(sysKey)]));
+    const fr=document.createElement('iframe');
+    fr.style.cssText='position:fixed;left:-9999px;top:-9999px;width:120px;height:120px;opacity:0;pointer-events:none;border:0';
+    fr.setAttribute('allow','cross-origin-isolated');
+    let done=false,timer=0,idle=0;
+    const finish=ok=>{
+      if(done)return;done=true;clearTimeout(timer);clearTimeout(idle);removeEventListener('message',onMsg);
+      try{fr.remove();URL.revokeObjectURL(romUrl)}catch(_){}
+      if(ok){const m=getOfflineMeta();m[sysKey]={ready:true,threads,at:Date.now()};setOfflineMeta(m);updateOfflineSummary()}
+      resolve(ok);
+    };
+    const onMsg=e=>{if(e.data&&e.data.__prep===sysKey){if(e.data.coreHit){clearTimeout(idle);idle=setTimeout(()=>finish(true),1500)}if(e.data.fatal)finish(false)}};
+    addEventListener('message',onMsg);
+    timer=setTimeout(()=>finish(true),sysKey=='psp'?22000:14000);
+    fr.srcdoc=`<!doctype html><html><body><div id="g" style="width:100px;height:100px"></div><script>
+      ${IN_IFRAME_NET_INTERCEPTOR}
+      const of=window.fetch;
+      window.fetch=async function(i,o){const r=await of(i,o);const u=typeof i==='string'?i:(i&&i.url)||'';if(u.includes('/cores/')&&!u.includes('reports'))parent.postMessage({__prep:'${sysKey}',coreHit:true},'*');return r};
+      EJS_player='#g';EJS_core='${core}';EJS_gameUrl='${romUrl}';EJS_gameName='prep_${core}';EJS_pathtodata='${path}';EJS_startOnLoaded=true;EJS_threads=${threads};
+      EJS_defaultOptions={'virtual-gamepad':'disabled','shader':'disabled'};
+      const s=document.createElement('script');s.src='${path}loader.js';s.onerror=()=>parent.postMessage({__prep:'${sysKey}',fatal:true},'*');document.body.appendChild(s);
+    <\/script></body></html>`;
+    document.body.appendChild(fr);
+  });
+}
+
+$('#diag-open').onclick=async()=>{
+  let sw='غير مدعوم',usage=0,quota=0,entries=0;
+  if('serviceWorker' in navigator){
+    try{const reg=await navigator.serviceWorker.getRegistration();sw=navigator.serviceWorker.controller?'نشط ومتحكم ✓':(reg?'مسجل (يحتاج تحديث الصفحة)':'غير مسجل')}catch(e){sw=e.message}
+  }
+  if(navigator.storage&&navigator.storage.estimate){const e=await navigator.storage.estimate();usage=e.usage||0;quota=e.quota||0}
+  if('caches' in window){try{const c=await caches.open(EJS_CACHE);entries=(await c.keys()).length}catch(_){}}
+  const ready=Object.keys(SYS).filter(k=>getOfflineMeta()[k]?.ready).map(k=>SYS[k][0]).join('، ')||'لا شيء بعد';
+  const gps=navigator.getGamepads?[...navigator.getGamepads()].filter(Boolean).map(g=>g.id):[];
+  sheet(`<h1>تشخيص الأوفلاين والأداء</h1>
+    <div class="row">Service Worker<b class="sp">${esc(sw)}</b></div>
+    <div class="row">العزل والتشغيل المتوازي (PSP Threads)<b class="sp ${iso()?'ok':'bad'}">${iso()?'متاح ✓':'غير متاح'}</b></div>
+    <div class="row">حجم الكاش الأوفلاين<b class="sp">${(usage/1048576).toFixed(1)} MB / ${(quota/1048576).toFixed(0)} MB (${entries} ملف)</b></div>
+    <div class="row">الأنظمة المجهّزة<small class="sp">${esc(ready)}</small></div>
+    <div class="row">أذرع التحكم المتصلة (${gps.length})<small class="sp">${esc(gps.join(' | ')||'لا توجد يد متصلة — اضغط أي زر فيها')}</small></div>`);
+};
+
+// ===== يد التحكم المخصصة (لكل gamepad.id و P1–P4) =====
+const GP_ACTIONS=[['0','✕ / B'],['8','○ / A'],['1','□ / Y'],['9','△ / X'],['10','L1'],['11','R1'],['12','L2'],['13','R2'],['2','SELECT'],['3','START'],['14','L3'],['15','R3'],['4','▲'],['5','▼'],['6','◀'],['7','▶']];
+const getGpMap=()=>{try{return JSON.parse(localStorage.rv_gp_map||'{}')}catch(_){return {}}};
+const setGpMap=m=>{localStorage.rv_gp_map=JSON.stringify(m)};
+$('#gp-open').onclick=()=>{
+  const pads=navigator.getGamepads?[...navigator.getGamepads()].filter(Boolean):[];
+  const devId=pads[0]?pads[0].id:'default';
+  const allM=getGpMap(),curM=allM[devId]||{};
+  sheet(`<h1>تعيين أزرار يد التحكم</h1>
+    <div class="row"><div><b>اليد النشطة</b><small style="direction:ltr">${esc(devId)}</small></div><button class="btn g sm sp" id="gp-rst">افتراضي</button></div>
+    <small style="color:var(--mu);display:block;margin-bottom:10px">اضغط على أي زر ثم اضغط الزر المقابل على اليد لتعيينه.</small>
+    ${GP_ACTIONS.map(([ej,lb])=>{
+      const hit=Object.keys(curM).find(bi=>String(curM[bi])===ej);
+      return `<div class="row"><b>${lb}</b><button class="btn g sm sp" data-re="${ej}">${hit!==undefined?'Button '+hit:'افتراضي'}</button></div>`;
+    }).join('')}`);
+  $('#gp-rst').onclick=()=>{delete allM[devId];setGpMap(allM);$('#gp-open').click();toast('تمت إعادة التعيين')};
+  $$('#shc [data-re]').forEach(btn=>btn.onclick=()=>{
+    btn.textContent='اضغط زر اليد الآن...';
+    const listen=setInterval(()=>{
+      const p=navigator.getGamepads?[...navigator.getGamepads()].find(Boolean):null;
+      if(!p)return;
+      const bi=p.buttons.findIndex(b=>b.pressed);
+      if(bi>=0){clearInterval(listen);allM[devId]=allM[devId]||{};allM[devId][bi]=Number(btn.dataset.re);setGpMap(allM);$('#gp-open').click()}
+    },50);
+    setTimeout(()=>clearInterval(listen),5000);
+  });
+};
+
+// ===== AudioContext & Visibility Pause & WakeLock =====
+const audioCtxs=[];
+if(window.AudioContext||window.webkitAudioContext){
+  const Orig=window.AudioContext||window.webkitAudioContext;
+  if(!Orig.__rv){
+    const W=function(...a){const c=new Orig(...a);audioCtxs.push(c);return c};
+    W.prototype=Orig.prototype;W.__rv=true;window.AudioContext=W;
+  }
+}
+function resumeTrackedAudio(){audioCtxs.forEach(c=>{if(c&&c.state==='suspended')c.resume().catch(()=>{})})}
+let wakeSent=null;
+async function lockWake(){try{if('wakeLock' in navigator&&!wakeSent)wakeSent=await navigator.wakeLock.request('screen')}catch(_){}}
+function freeWake(){try{if(wakeSent){wakeSent.release().catch(()=>{});wakeSent=null}}catch(_){}}
+document.addEventListener('visibilitychange',()=>{
+  if($('#pl').classList.contains('on')){
+    try{const emu=$('#fr').contentWindow&&$('#fr').contentWindow.EJS_emulator;if(emu){document.hidden?emu.pause&&emu.pause():emu.play&&emu.play()}}catch(_){}
+  }
+});
+
+// ===== التشغيل الفعلي داخل iframe معزول + حماية PSP والأوفلاين =====
+let cur=null,wd=0,logs=[],cdnI=0,noTh=false,started=false,isPaused=false;
+async function play(id){
+  const g=games.find(x=>x.id==id);if(!g)return;
+  if(g.sys=='psp'&&g.blob.size>400*1024*1024&&/\.iso$/i.test(g.name)){
+    if(!confirm('ملف PSP ISO كبير جداً (> 400 MB). يُنصح بضغطه إلى .cso أو .pbp لتفادي بطء الذاكرة. متابعة التشغيل؟'))return;
+  }
+  const needTh=(g.sys=='psp')?(CF['s-th']!='off'&&iso()):thr();
+  if(!navigator.onLine&&!(await hasEmbeddedLocal())&&!isSysPreparedOffline(g.sys)){
+    return toast('هذا النظام يحتاج تجهيزاً مرة واحدة بالإنترنت (الإعدادات ← الحزمة الأوفلاين)');
+  }
+  cur=g;g.last=Date.now();dbPut('roms',g);await start(needTh);
+}
+async function start(forceThreads){
+  const g=cur;logs=[];started=false;isPaused=false;$('#ps').textContent='⏸';
+  $('#err').classList.remove('on');$('#ld').style.display='flex';$('#ldt').textContent='جاري تشغيل نواة '+SYS[g.sys][0]+'...';
+  $('#pl').classList.add('on');$('#tt').textContent=clean(g.name);buildPad(g.sys);syncGpBadge();
+  const b=await dbGet('bios',g.sys),path=await resolveDataBase();
+  const cheats=JSON.parse(localStorage['ch'+g.id]||'[]').filter(c=>c.on).map(c=>[c.n,c.c]);
+  const useTh=(typeof forceThreads==='boolean')?forceThreads:thr();
+  if(g.sys=='psp'&&!iso()&&!noTh)logs.push('PSP_NO_SAB: crossOriginIsolated=false');
+  const opts={'virtual-gamepad':'disabled'};
+  if(CF['s-sh']||g.sys=='psp'){opts.shader='disabled'}
+  if(g.sys=='psp'){opts['rewind-enabled']='disabled';opts['psp_internal_resolution']='1x';opts.frameskip='auto'}
+  if(window.__launch){try{URL.revokeObjectURL(window.__launch.rom);window.__launch.bios&&URL.revokeObjectURL(window.__launch.bios)}catch(_){}}
+  window.__launch={core:SYS[g.sys][1],rom:URL.createObjectURL(g.blob),name:clean(g.name),path,bios:b?URL.createObjectURL(b.blob):'',cheats,threads:useTh,opts};
+  const fr=$('#fr');
+  fr.srcdoc=`<!doctype html><html><body style="margin:0;background:#000;height:100vh"><div id="game" style="width:100%;height:100%"></div><style>.ejs_virtualGamepad_parent{display:none!important}</style><script>
+${IN_IFRAME_NET_INTERCEPTOR}
 const P=parent.__launch,S=(t,m)=>parent.postMessage({t,m:String(m)},'*');
 EJS_player='#game';EJS_core=P.core;EJS_gameUrl=P.rom;EJS_gameName=P.name;EJS_pathtodata=P.path;EJS_startOnLoaded=true;EJS_color='#8B5CF6';
 if(P.bios)EJS_biosUrl=P.bios;EJS_cheats=P.cheats;EJS_threads=P.threads;EJS_defaultOptions=P.opts;
-EJS_onGameStart=()=>S('ok','');
+EJS_onGameStart=()=>{S('ok','');try{window.focus()}catch(_){}};
 onerror=(m,u,l)=>S('err',m+' @'+(u||'')+':'+l);addEventListener('unhandledrejection',e=>S('err',e.reason));
 const ce=console.error;console.error=(...a)=>{S('err',a.join(' '));ce(...a)};
 const s=document.createElement('script');s.src=P.path+'loader.js';s.onerror=()=>S('err','تعذر تحميل loader.js من '+P.path);document.body.appendChild(s);
 <\/script></body></html>`;
- clearTimeout(wd);wd=setTimeout(()=>{if(!started)fail()},25000)}
-addEventListener('message',e=>{const d=e.data;if(!d||!d.t)return;if(d.t=='ok'){started=true;clearTimeout(wd);$('#ld').style.display='none'}if(d.t=='err'){logs.push(d.m);if(!started&&/loader|Failed to fetch|NetworkError|load/i.test(d.m))clearTimeout(wd),setTimeout(fail,800)}});
-function fail(){if(started)return;const txt=logs.join('\n');let w='السبب المرجّح: ';
- if(!navigator.onLine)w+='لا يوجد إنترنت (مطلوب أول مرة لتحميل النواة).';else if(/loader|fetch|Network/i.test(txt))w+='تعذر تحميل ملفات المحرك من الـ CDN. جرّب تبديل الـ CDN.';
- else if(cur.sys=='psp'&&!iso())w+='PSP يحتاج Threads، وغير متاحة الآن. شغّل التطبيق من https (GitHub Pages).';else if(/bios/i.test(txt))w+='ملف BIOS مفقود أو غير صحيح.';
- else w+='لم تبدأ النواة خلال 25 ثانية. تأكد من النظام الصحيح للملف (من ⋯).';
- $('#why').textContent=w;$('#log').textContent=txt||'(لا أخطاء مسجلة) crossOriginIsolated='+iso();$('#err').classList.add('on')}
-$('#e-re').onclick=start;$('#e-cdn').onclick=()=>{cdnI++;start()};$('#e-nt').onclick=()=>{noTh=true;start()};
-$('#e-ai').onclick=async()=>{const k=CF['s-key'];if(!k)return $('#ai').textContent='أضف مفتاح Gemini من الإعدادات.';$('#ai').textContent='...';
- try{const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${CF['s-mod']||'gemini-2.5-flash'}:generateContent?key=${k}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:`أنا أشغّل لعبة نظام ${cur.sys} (${cur.name}) في EmulatorJS داخل WebView وتظهر شاشة سوداء. crossOriginIsolated=${iso()}. السجل:\n${logs.join('\n')}\nاشرح السبب وخطوات الحل بالعربية باختصار.`}]}]})});const j=await r.json();$('#ai').textContent=j.candidates?.[0]?.content?.parts?.[0]?.text||JSON.stringify(j.error||j)}catch(e){$('#ai').textContent='تعذر الاتصال: '+e}};
-$('#bk').onclick=()=>{$('#fr').srcdoc='';$('#pl').classList.remove('on');clearTimeout(wd);if(window.__launch){URL.revokeObjectURL(__launch.rom);__launch.bios&&URL.revokeObjectURL(__launch.bios)}load()};
-$('#rot').onclick=()=>{try{const o=screen.orientation;o.lock(o.type.startsWith('portrait')?'landscape':'portrait')}catch(e){toast('التدوير غير مدعوم، استخدم تدوير الجهاز')}};
-// ===== أزرار اللمس + يد التحكم =====
-const send=(i,v)=>{try{$('#fr').contentWindow.EJS_emulator.gameManager.simulateInput(0,i,v)}catch(e){}};
+  clearTimeout(wd);wd=setTimeout(()=>{if(!started)fail()},g.sys=='psp'?40000:25000);
+}
+addEventListener('message',e=>{
+  const d=e.data;if(!d||!d.t)return;
+  if(d.t=='ok'){started=true;clearTimeout(wd);$('#ld').style.display='none';lockWake();resumeTrackedAudio();try{$('#fr').focus()}catch(_){}}
+  if(d.t=='err'){logs.push(d.m);if(!started&&/loader|Failed to fetch|NetworkError|load/i.test(d.m)){clearTimeout(wd);setTimeout(fail,700)}}
+});
+function fail(){
+  if(started)return;const txt=logs.join('\n');let w='السبب المرجّح: ';
+  if(!navigator.onLine&&!isSysPreparedOffline(cur.sys))w+='لا يوجد إنترنت، وهذا النظام غير مجهّز أوفلاين (افتح الإعدادات ← الحزمة الأوفلاين).';
+  else if(/loader|fetch|Network/i.test(txt))w+='تعذر تحميل ملفات المحرك من الـ CDN. جرّب تبديل الـ CDN أو تجهيز الحزمة أوفلاين.';
+  else if(cur.sys=='psp'&&!iso())w+='PSP يحتاج SharedArrayBuffer/Threads. افتحه عبر HTTPS (GitHub Pages) أو اضغط "بدون Threads".';
+  else if(/bios/i.test(txt))w+='ملف BIOS مفقود أو غير صحيح.';
+  else w+='لم تبدأ النواة خلال المهلة. تأكد من النظام الصحيح للملف (من ⋯).';
+  $('#why').textContent=w;$('#log').textContent=txt||('crossOriginIsolated='+iso());$('#err').classList.add('on');
+}
+$('#e-re').onclick=()=>start();$('#e-cdn').onclick=()=>{cdnI++;start()};$('#e-nt').onclick=()=>{noTh=true;start(false)};
+$('#e-off').onclick=()=>{$('#bk').click();openOfflineManager()};
+$('#e-ai').onclick=async()=>{
+  if(!navigator.onLine)return $('#ai').textContent='تحتاج إنترنت لتحليل الأخطاء بالذكاء الاصطناعي.';
+  const k=CF['s-key'];if(!k)return $('#ai').textContent='أضف مفتاح Gemini من الإعدادات.';$('#ai').textContent='...';
+  try{const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${CF['s-mod']||'gemini-2.5-flash'}:generateContent?key=${k}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:`أنا أشغّل لعبة نظام ${cur.sys} (${cur.name}) في EmulatorJS. crossOriginIsolated=${iso()}. السجل:\n${logs.join('\n')}\nاشرح السبب وخطوات الحل بالعربية باختصار.`}]}]})});const j=await r.json();$('#ai').textContent=j.candidates?.[0]?.content?.parts?.[0]?.text||JSON.stringify(j.error||j)}catch(e){$('#ai').textContent='تعذر الاتصال: '+e}
+};
+$('#bk').onclick=()=>{$('#fr').srcdoc='';$('#pl').classList.remove('on');clearTimeout(wd);freeWake();if(window.__launch){try{URL.revokeObjectURL(window.__launch.rom);window.__launch.bios&&URL.revokeObjectURL(window.__launch.bios)}catch(_){}}load()};
+$('#ps').onclick=()=>{isPaused=!isPaused;$('#ps').textContent=isPaused?'▶':'⏸';try{const emu=$('#fr').contentWindow.EJS_emulator;isPaused?emu.pause():emu.play()}catch(_){}};
+$('#rot').onclick=()=>{try{const o=screen.orientation;o.lock(o.type.startsWith('portrait')?'landscape':'portrait')}catch(e){toast('استخدم تدوير الجهاز')}};
+
+// ===== أزرار اللمس =====
+const sendP=(pl,i,v)=>{try{$('#fr').contentWindow.EJS_emulator.gameManager.simulateInput(pl||0,i,v)}catch(_){}};
+const send=(i,v)=>sendP(0,i,v);
 const vib=()=>CF['s-vb']&&navigator.vibrate&&navigator.vibrate(8);
-function buildPad(sys){const ps=sys=='psx'||sys=='psp',P=$('#pad');P.className='';P.innerHTML='';
- const face=ps?{t:['△',9],b:['✕',0],l:['□',1],r:['○',8]}:{t:['X',9],b:['B',0],l:['Y',1],r:['A',8]};
- const K=(l,i,css,cl='')=>{const d=document.createElement('div');d.className='k '+cl;d.textContent=l;d.style.cssText=css;
-  const dn=e=>{e.preventDefault();d.classList.add('on');send(i,1);vib()},up=e=>{d.classList.remove('on');send(i,0)};
-  d.addEventListener('pointerdown',dn);['pointerup','pointercancel','pointerleave'].forEach(x=>d.addEventListener(x,up));P.appendChild(d)};
- const port=matchMedia('(orientation:portrait)').matches,Y=port?'top:':'bottom:',base=port?'top:70px':'bottom:60px';
- const dp=port?'left:34px;top:70px':'left:40px;bottom:50px',fc=port?'right:30px;top:60px':'right:40px;bottom:40px';
- // D-pad
- [['▲',4,50,0],['▼',5,50,100],['◀',6,0,50],['▶',7,100,50]].forEach(([l,i,x,y])=>K(l,i,`width:50px;height:50px;${dp.split(';').map((s,n)=>{const[k,v]=s.split(':');return k+':calc('+v+' + '+(k=='left'?x:(k=='bottom'?100-y:y))+'px)'}).join(';')}`,'r'));
- // أزرار الوجه
- const F=(o,x,y)=>K(o[0],o[1],`width:56px;height:56px;${fc.split(';').map(s=>{const[k,v]=s.split(':');return k+':calc('+v+' + '+(k=='right'?x:(k=='bottom'?104-y:y))+'px)'}).join(';')}`);
- F(face.t,52,0);F(face.b,52,104);F(face.l,104,52);F(face.r,0,52);
- // الكتف + Start/Select
- K('L1',10,'width:62px;height:34px;left:14px;top:6px','r');K('R1',11,'width:62px;height:34px;right:14px;top:6px','r');
- if(sys=='psx'){K('L2',12,'width:62px;height:34px;left:84px;top:6px','r');K('R2',13,'width:62px;height:34px;right:84px;top:6px','r');K('L3',14,'width:44px;height:30px;left:calc(50% - 50px);bottom:10px','r');K('R3',15,'width:44px;height:30px;left:calc(50% + 6px);bottom:10px','r')}
- K('SELECT',2,'width:70px;height:28px;font-size:11px;left:calc(50% - 76px);top:8px','r');K('START',3,'width:70px;height:28px;font-size:11px;left:calc(50% + 6px);top:8px','r');
- // العصي التناظرية
- const J=(b,css)=>{const e=document.createElement('div');e.className='js';e.style.cssText=css;e.innerHTML='<i></i>';let id=null;
-  const mv=ev=>{const r=e.getBoundingClientRect(),x=Math.max(-1,Math.min(1,(ev.clientX-r.left-60)/50)),y=Math.max(-1,Math.min(1,(ev.clientY-r.top-60)/50));e.firstChild.style.transform=`translate(${x*34}px,${y*34}px)`;
-   send(b,x>0.1?x*32767|0:0);send(b+1,x<-0.1?-x*32767|0:0);send(b+2,y>0.1?y*32767|0:0);send(b+3,y<-0.1?-y*32767|0:0)};
-  e.onpointerdown=ev=>{id=ev.pointerId;e.setPointerCapture(id);mv(ev)};e.onpointermove=ev=>{if(id===ev.pointerId)mv(ev)};
-  e.onpointerup=e.onpointercancel=()=>{id=null;e.firstChild.style.transform='';[0,1,2,3].forEach(n=>send(b+n,0))};P.appendChild(e)};
- if(['psx','psp','n64','nds'].includes(sys)&&sys!='nds'){port?J(16,'left:20px;bottom:30px'):J(16,'left:200px;bottom:20px');if(sys=='psx')port?J(20,'right:20px;bottom:30px'):J(20,'right:230px;bottom:20px')}}
-// يد التحكم (Gamepad API)
-const GM=[0,8,1,9,10,11,12,13,2,3,14,15,4,5,6,7],gs={};
-(function poll(){const p=navigator.getGamepads?[...navigator.getGamepads()].find(x=>x):null;
- if(p&&$('#pl').classList.contains('on')){$('#pl').classList.add('hid');p.buttons.forEach((b,i)=>{if(GM[i]!=null&&gs[i]!==b.pressed){gs[i]=b.pressed;send(GM[i],b.pressed?1:0)}});
-  [[0,16],[2,20]].forEach(([a,base])=>{const x=p.axes[a]||0,y=p.axes[a+1]||0,dz=0.15;send(base,x>dz?x*32767|0:0);send(base+1,x<-dz?-x*32767|0:0);send(base+2,y>dz?y*32767|0:0);send(base+3,y<-dz?-y*32767|0:0)})}
- else $('#pl').classList.remove('hid');requestAnimationFrame(poll)})();
+function buildPad(sys){
+  const ps=sys=='psx'||sys=='psp',P=$('#pad');P.innerHTML='';
+  const face=ps?{t:['△',9],b:['✕',0],l:['□',1],r:['○',8]}:{t:['X',9],b:['B',0],l:['Y',1],r:['A',8]};
+  const K=(l,i,css,cl='')=>{
+    const d=document.createElement('div');d.className='k '+cl;d.textContent=l;d.style.cssText=css;
+    const dn=e=>{e.preventDefault();resumeTrackedAudio();d.classList.add('on');send(i,1);vib()},up=()=>{d.classList.remove('on');send(i,0)};
+    d.addEventListener('pointerdown',dn);['pointerup','pointercancel','pointerleave'].forEach(x=>d.addEventListener(x,up));P.appendChild(d);
+  };
+  const port=matchMedia('(orientation:portrait)').matches;
+  const dp=port?'left:28px;top:72px':'left:36px;bottom:48px',fc=port?'right:26px;top:64px':'right:36px;bottom:40px';
+  [['▲',4,48,0],['▼',5,48,96],['◀',6,0,48],['▶',7,96,48]].forEach(([l,i,x,y])=>K(l,i,`width:48px;height:48px;${dp.split(';').map(s=>{const[k,v]=s.split(':');return k+':calc('+v+' + '+(k=='left'?x:(k=='bottom'?96-y:y))+'px)'}).join(';')}`,'r'));
+  const F=(o,x,y)=>K(o[0],o[1],`width:54px;height:54px;${fc.split(';').map(s=>{const[k,v]=s.split(':');return k+':calc('+v+' + '+(k=='right'?x:(k=='bottom'?100-y:y))+'px)'}).join(';')}`);
+  F(face.t,50,0);F(face.b,50,100);F(face.l,100,50);F(face.r,0,50);
+  K('L1',10,'width:60px;height:34px;left:14px;top:6px','r');K('R1',11,'width:60px;height:34px;right:14px;top:6px','r');
+  if(sys=='psx'){K('L2',12,'width:56px;height:32px;left:80px;top:6px','r');K('R2',13,'width:56px;height:32px;right:80px;top:6px','r');K('L3',14,'width:42px;height:28px;left:calc(50% - 48px);bottom:10px','r');K('R3',15,'width:42px;height:28px;left:calc(50% + 6px);bottom:10px','r')}
+  K('SELECT',2,'width:66px;height:28px;font-size:11px;left:calc(50% - 70px);top:8px','r');K('START',3,'width:66px;height:28px;font-size:11px;left:calc(50% + 4px);top:8px','r');
+  const J=(b,css)=>{
+    const e=document.createElement('div');e.className='js';e.style.cssText=css;e.innerHTML='<i></i>';let pid=null;
+    const mv=ev=>{const r=e.getBoundingClientRect(),x=Math.max(-1,Math.min(1,(ev.clientX-r.left-58)/46)),y=Math.max(-1,Math.min(1,(ev.clientY-r.top-58)/46));e.firstChild.style.transform=`translate(${x*32}px,${y*32}px)`;
+      send(b,x>0.12?x*32767|0:0);send(b+1,x<-0.12?-x*32767|0:0);send(b+2,y>0.12?y*32767|0:0);send(b+3,y<-0.12?-y*32767|0:0)};
+    e.onpointerdown=ev=>{pid=ev.pointerId;e.setPointerCapture(pid);mv(ev)};e.onpointermove=ev=>{if(pid===ev.pointerId)mv(ev)};
+    e.onpointerup=e.onpointercancel=()=>{pid=null;e.firstChild.style.transform='';[0,1,2,3].forEach(n=>send(b+n,0))};P.appendChild(e);
+  };
+  if(['psx','psp','n64'].includes(sys)){port?J(16,'left:18px;bottom:26px'):J(16,'left:195px;bottom:18px');if(sys=='psx')port?J(20,'right:18px;bottom:26px'):J(20,'right:215px;bottom:18px')}
+}
+
+// ===== يد التحكم الكاملة (Gamepad API 4 لاعبين + Hat + Deadzone + Triggers + Rumble + Shortcut) =====
+const GM=[0,8,1,9,10,11,12,13,2,3,14,15,4,5,6,7],gs={},ga={};
+let gpWaitTimer=0,gpShortCD=0,lastGpCount=-1;
+function syncGpBadge(){
+  const pads=navigator.getGamepads?[...navigator.getGamepads()].filter(Boolean):[];
+  const b=$('#gpbadge'),st=$('#gp-stat');
+  if(pads.length){
+    const label='تم توصيل: '+(pads[0].id.split('(')[0].trim()||'يد تحكم')+(pads.length>1?` (+${pads.length-1})`:'');
+    b.className='on';b.textContent='🎮 '+label;if(st)st.textContent=label;
+  }else{
+    b.className='on wait';b.textContent='🎮 اضغط أي زر في اليد لتفعيلها';if(st)st.textContent='اضغط أي زر في اليد لتفعيلها';
+  }
+}
+addEventListener('gamepadconnected',syncGpBadge);addEventListener('gamepaddisconnected',syncGpBadge);
+
+(function pollPads(){
+  const pads=navigator.getGamepads?[...navigator.getGamepads()]:[],active=[];
+  for(let p=0;p<Math.min(4,pads.length);p++)if(pads[p])active.push([p,pads[p]]);
+  if(active.length!==lastGpCount){lastGpCount=active.length;syncGpBadge()}
+  const plOn=$('#pl').classList.contains('on');
+  $('#pl').classList.toggle('hid',!!(plOn&&CF['s-ah']&&active.length));
+  if(plOn){
+    const dz=Number(CF['s-dz']||0.15),allM=getGpMap();
+    active.forEach(([pi,gp])=>{
+      const custom=allM[gp.id]||{};
+      // Shortcut Select (8) + Start (9) -> Toggle Pause/Menu
+      if(gp.buttons[8]?.pressed&&gp.buttons[9]?.pressed&&performance.now()>gpShortCD){
+        gpShortCD=performance.now()+700;$('#ps').click();
+      }
+      gp.buttons.forEach((btn,bi)=>{
+        const ej=custom[bi]!==undefined?custom[bi]:GM[bi];if(ej==null)return;
+        const val=(bi===6||bi===7)?(btn.value>0.15?btn.value:0):(btn.pressed?1:0),k=pi+'_'+bi;
+        if(gs[k]!==val){
+          gs[k]=val;sendP(pi,ej,val);
+          if(val>0&&CF['s-vb']&&gp.vibrationActuator&&gp.vibrationActuator.playEffect&&(bi<4)){
+            gp.vibrationActuator.playEffect('dual-rumble',{duration:35,weakMagnitude:.2,strongMagnitude:.3}).catch(()=>{});
+          }
+        }
+      });
+      // Hat Switch Axes[9] fallback
+      if(gp.axes&&gp.axes.length>9&&!gp.buttons[12]){
+        const h=gp.axes[9],u=(h>=-1.05&&h<=-0.75)||(h>=0.75&&h<=1.05)?1:0,r=(h>=-0.75&&h<=-0.15)?1:0,d=(h>=-0.15&&h<=0.35)?1:0,l=(h>=0.35&&h<=0.78)?1:0;
+        [[4,u],[5,d],[6,l],[7,r]].forEach(([ei,v])=>{const k=pi+'_h_'+ei;if(gs[k]!==v){gs[k]=v;sendP(pi,ei,v)}});
+      }
+      [[0,16],[2,20]].forEach(([ax,base])=>{
+        const x=gp.axes[ax]||0,y=gp.axes[ax+1]||0;
+        [[base,x>dz?x*32767|0:0],[base+1,x<-dz?-x*32767|0:0],[base+2,y>dz?y*32767|0:0],[base+3,y<-dz?-y*32767|0:0]].forEach(([ei,v])=>{
+          const k=pi+'_a_'+ei;if(ga[k]!==v){ga[k]=v;sendP(pi,ei,v)}
+        });
+      });
+    });
+  }
+  requestAnimationFrame(pollPads);
+})();
+
+// لوحة المفاتيح HID لمنع التمرير
+const KM={ArrowUp:4,ArrowDown:5,ArrowLeft:6,ArrowRight:7,z:0,Z:0,x:8,X:8,a:1,A:1,s:9,S:9,q:10,Q:10,e:11,E:11,Enter:3,Shift:2};
+addEventListener('keydown',e=>{if(KM[e.key]!==undefined&&$('#pl').classList.contains('on')){e.preventDefault();send(KM[e.key],1)}},{passive:false});
+addEventListener('keyup',e=>{if(KM[e.key]!==undefined&&$('#pl').classList.contains('on')){e.preventDefault();send(KM[e.key],0)}},{passive:false});
 addEventListener('resize',()=>{if($('#pl').classList.contains('on')&&cur)buildPad(cur.sys)});
-// ===== الإقلاع =====
-if('serviceWorker' in navigator&&location.protocol=='https:'&&!iso()&&!sessionStorage.coi){sessionStorage.coi=1;navigator.serviceWorker.register('coi-serviceworker.js').then(r=>{if(r.active&&!navigator.serviceWorker.controller)location.reload();else navigator.serviceWorker.ready.then(()=>location.reload())}).catch(()=>{})}
+
+// ===== الإقلاع والتخزين الدائم =====
+if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{});
+if('serviceWorker' in navigator&&location.protocol=='https:'&&!iso()&&!sessionStorage.coi){
+  sessionStorage.coi=1;
+  navigator.serviceWorker.register('coi-serviceworker.js').then(r=>{
+    if(r.active&&!navigator.serviceWorker.controller)location.reload();
+    else navigator.serviceWorker.ready.then(()=>location.reload());
+  }).catch(()=>{});
+}else if('serviceWorker' in navigator&&location.protocol=='https:'){
+  navigator.serviceWorker.register('coi-serviceworker.js').catch(()=>{});
+}
 const PROJECT='https://github.com/alrwys062/Game-emulator-apk',PAGES='https://alrwys062.github.io/Game-emulator-apk/';
 $('#repo').href=PROJECT;$('#repot').textContent='alrwys062/Game-emulator-apk';$('#pages').href=PAGES;$('#pagest').textContent=PAGES;
-if(location.protocol=='file:')setTimeout(()=>toast('أنت تشغّل الملف محلياً. افتح التطبيق من رابط GitHub Pages ليعمل المحرك.'),1200);
-idb().then(load);$('#inf').textContent='proto='+location.protocol+' · isolated='+iso()+' · WebGL2='+!!document.createElement('canvas').getContext('webgl2');
-setTimeout(()=>{$('#sp').style.opacity=0;setTimeout(()=>$('#sp').remove(),600)},900);
+idb().then(load);
+syncOnlineUI();
+$('#inf').textContent='proto='+location.protocol+' · isolated='+iso()+' · WebGL2='+!!document.createElement('canvas').getContext('webgl2');
+setTimeout(()=>{$('#sp').style.opacity=0;setTimeout(()=>$('#sp').remove(),500)},750);
 </script></body></html>

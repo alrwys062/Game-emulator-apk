@@ -79,9 +79,11 @@ import com.example.viewmodel.DownloadTaskState
 
 @Composable
 fun StoreScreen(
+    isOnline: Boolean,
     downloadTask: DownloadTaskState?,
     onOpenSource: (LegalSource) -> Unit,
-    onImportFromPhone: () -> Unit
+    onImportFromPhone: () -> Unit,
+    onShowMessage: (String) -> Unit
 ) {
     val strings = LocalAppStrings.current
     val isArabic = LocalIsArabic.current
@@ -136,13 +138,39 @@ fun StoreScreen(
             }
         }
 
+        // Offline Banner in Store when offline
+        if (!isOnline) {
+            item {
+                Box(
+                    modifier = Modifier
+                        .widthIn(max = 600.dp)
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 4.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0x33F43F5E))
+                        .border(1.dp, Color(0x66F43F5E), RoundedCornerShape(16.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        text = if (isArabic) "وضع الأوفلاين — المصادر الخارجية تحتاج إنترنت (استيراد الهاتف يعمل بدون إنترنت)"
+                        else "Offline mode — External store links require internet (Phone import works offline)",
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = Color(0xFFFDA4AF)
+                    )
+                }
+            }
+        }
+
         // Legal Store Source Cards
         items(StoreCatalog.legalSources, key = { it.id }) { source ->
             LegalSourceCard(
                 source = source,
                 subtitle = if (isArabic) source.subtitleAr else source.subtitleEn,
-                legalBadge = strings.legalBadge,
-                onClick = { onOpenSource(source) }
+                legalBadge = if (isOnline) strings.legalBadge else (if (isArabic) "تحتاج إنترنت" else "Needs internet"),
+                onClick = {
+                    if (isOnline) onOpenSource(source)
+                    else onShowMessage(if (isArabic) "تحتاج إنترنت" else "Needs internet")
+                }
             )
         }
 
@@ -315,7 +343,10 @@ fun StoreScreen(
                     .clip(RoundedCornerShape(20.dp))
                     .background(MaterialTheme.colorScheme.surface)
                     .border(1.dp, BorderSubtle, RoundedCornerShape(20.dp))
-                    .clickable { onOpenSource(doc) }
+                    .clickable {
+                    if (isOnline) onOpenSource(doc)
+                    else onShowMessage(if (isArabic) "تحتاج إنترنت" else "Needs internet")
+                }
                     .padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {

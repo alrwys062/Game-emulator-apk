@@ -19,7 +19,15 @@ import com.example.model.RetroSystem
 import com.example.service.AiPerfRecommendation
 import com.example.service.DeviceSpecSummary
 import com.example.service.GeminiAssistantService
+import com.example.service.NetworkMonitor
+import com.example.service.OfflineCoreBundleState
+import com.example.service.OfflineCoreManager
+import com.example.service.OfflineDiagnosticsReport
+import com.example.service.OfflinePrepProgress
+import com.example.service.OfflinePrepRequest
 import com.example.ui.components.MainTab
+import org.json.JSONArray
+import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -72,6 +80,10 @@ class RetroViewModel(application: Application) : AndroidViewModel(application) {
     private val db = RetroDatabase.getInstance(application)
     private val gameRepo = GameRepository(application, db.retroDao())
     private val settingsRepo = SettingsRepository(application)
+    private val networkMonitor = NetworkMonitor(application)
+    val offlineCoreManager = OfflineCoreManager(application)
+
+    val isOnline: StateFlow<Boolean> = networkMonitor.isOnline
 
     val settings: StateFlow<RetroSettings> = settingsRepo.settingsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, RetroSettings())
@@ -126,11 +138,34 @@ class RetroViewModel(application: Application) : AndroidViewModel(application) {
     private val _connectedGamepadName = MutableStateFlow<String?>(null)
     val connectedGamepadName: StateFlow<String?> = _connectedGamepadName.asStateFlow()
 
+    private val _connectedGamepadNames = MutableStateFlow<List<String>>(emptyList())
+    val connectedGamepadNames: StateFlow<List<String>> = _connectedGamepadNames.asStateFlow()
+
     private val _storageUsedBytes = MutableStateFlow(0L)
     val storageUsedBytes: StateFlow<Long> = _storageUsedBytes.asStateFlow()
 
     private val _lastDiagnosticLogs = MutableStateFlow("")
     val lastDiagnosticLogs: StateFlow<String> = _lastDiagnosticLogs.asStateFlow()
+
+    // Offline Bundles & Diagnostics state
+    private val _offlineBundles = MutableStateFlow<List<OfflineCoreBundleState>>(emptyList())
+    val offlineBundles: StateFlow<List<OfflineCoreBundleState>> = _offlineBundles.asStateFlow()
+
+    private val _offlinePrepProgress = MutableStateFlow<OfflinePrepProgress?>(null)
+    val offlinePrepProgress: StateFlow<OfflinePrepProgress?> = _offlinePrepProgress.asStateFlow()
+
+    private val _activePrepRequest = MutableStateFlow<OfflinePrepRequest?>(null)
+    val activePrepRequest: StateFlow<OfflinePrepRequest?> = _activePrepRequest.asStateFlow()
+
+    private val _offlineDiagnostics = MutableStateFlow<OfflineDiagnosticsReport?>(null)
+    val offlineDiagnostics: StateFlow<OfflineDiagnosticsReport?> = _offlineDiagnostics.asStateFlow()
+
+    private val _diagnosticsTriggerId = MutableStateFlow(0)
+    val diagnosticsTriggerId: StateFlow<Int> = _diagnosticsTriggerId.asStateFlow()
+
+    private var bulkPrepQueue: MutableList<RetroSystem> = mutableListOf()
+    private var bulkPrepTotal: Int = 0
+    private var bulkPrepCompleted: Int = 0
 
     // AI Assistant state
     private val _aiBusy = MutableStateFlow(false)
@@ -202,15 +237,27 @@ class RetroViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             gameRepo.ensureSeededHomebrew()
             refreshConnectedGamepads()
+            refreshOfflineBundles()
             refreshStorageUsage()
             delay(1300L)
             _splashFinished.value = true
         }
     }
 
+    override fun onCleared() {
+        networkMonitor.unregister()
+        super.onCleared()
+    }
+
+    fun refreshOfflineBundles() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _offlineBundles.value = offlineCoreManager.getAllBundleStates()
+        }
+    }
+
     fun refreshStorageUsage() {
         viewModelScope.launch(Dispatchers.IO) {
-            _storageUsedBytes.value = gameRepo.calculateStorageUsageBytes()
+            _storageUsedBytes.value = gameRepo.calculateStorageUsageBytes() + offlineCoreManager.getTotalCacheSizeBytes()
         }
     }
 
@@ -228,10 +275,11 @@ class RetroViewModel(application: Application) : AndroidViewModel(application) {
         }
         val prev = _connectedGamepadName.value
         val next = names.firstOrNull()
+        _connectedGamepadNames.value = names.distinct()
         _connectedGamepadName.value = next
         if (next != null && prev != next) {
             val isAr = settings.value.language == "ar"
-            showToast(if (isAr) "تم توصيل يد التحكم: $next" else "Controller connected: $next")
+            showToast(if (isAr) "تم توصيل: $next" else "Connected: $next")
         }
     }
 
@@ -269,6 +317,18 @@ class RetroViewModel(application: Application) : AndroidViewModel(application) {
         if (sys.isComingSoon) {
             openSystemInLibrary(sys)
             return
+        }
+        val s = settings.value
+        val resolvedCore = if (s.selectedCore == "auto") game.coreOverride else s.selectedCore
+        if (game.localFilePath != null && !isOnline.value) {
+            val isAr = s.language == "ar"
+            if (!offlineCoreManager.isSystemReadyOffline(game.systemId, resolvedCore)) {
+                showToast(
+                    if (isAr) "هذا النظام يحتاج تجهيزاً مرة واحدة بالإنترنت (الإعدادات ← الحزمة الأوفلاين)"
+                    else "This system requires one-time online prep (Settings -> Offline Bundles)"
+                )
+                return
+            }
         }
         _isEngineTestMode.value = false
         _aiDiagnosticResult.value = null
@@ -443,8 +503,12 @@ class RetroViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun autoFetchCoverForGame(game: GameEntity) {
+        val isAr = settings.value.language == "ar"
+        if (!isOnline.value) {
+            showToast(if (isAr) "تنزيل الأغلفة يحتاج إنترنت" else "Needs internet")
+            return
+        }
         viewModelScope.launch {
-            val isAr = settings.value.language == "ar"
             showToast(if (isAr) "جاري البحث عن غلاف ${game.title}..." else "Searching cover for ${game.title}...")
             var ok = gameRepo.autoFetchCoverForGame(game)
             if (!ok && settings.value.geminiApiKey.isNotBlank()) {
@@ -469,10 +533,14 @@ class RetroViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun fetchAllMissingCovers() {
+        val isAr = settings.value.language == "ar"
+        if (!isOnline.value) {
+            showToast(if (isAr) "جلب الأغلفة يحتاج إنترنت" else "Needs internet")
+            return
+        }
         if (_bulkCoverProgress.value != null) return
         viewModelScope.launch {
             val targets = allGames.value.filter { it.coverUrl.isNullOrBlank() }
-            val isAr = settings.value.language == "ar"
             if (targets.isEmpty()) {
                 showToast(if (isAr) "جميع الألعاب لديها أغلفة بالفعل!" else "All games already have covers!")
                 return@launch
@@ -537,6 +605,11 @@ class RetroViewModel(application: Application) : AndroidViewModel(application) {
 
     // Store & Saves
     fun openStoreBrowser(title: String, url: String) {
+        if (!isOnline.value) {
+            val isAr = settings.value.language == "ar"
+            showToast(if (isAr) "المتجر يحتاج إنترنت" else "Store requires internet")
+            return
+        }
         _activeStoreBrowserUrl.value = title to url
     }
 
@@ -660,6 +733,217 @@ class RetroViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { settingsRepo.resetKeyBindings(playerIndex) }
     }
 
+    fun saveGamepadProfileBinding(gamepadId: String, actionId: String, keyCode: Int) {
+        viewModelScope.launch { settingsRepo.saveGamepadProfileBinding(gamepadId, actionId, keyCode) }
+    }
+
+    fun resetGamepadProfileBindings(gamepadId: String) {
+        viewModelScope.launch { settingsRepo.resetGamepadProfileBindings(gamepadId) }
+    }
+
+    // Offline Bundles & Diagnostics
+    fun prepareSystemOffline(sys: RetroSystem) {
+        val isAr = settings.value.language == "ar"
+        if (!isOnline.value) {
+            showToast(if (isAr) "تجهيز الحزم الأوفلاين يحتاج إنترنت" else "Needs internet to prepare offline bundle")
+            return
+        }
+        bulkPrepQueue.clear()
+        bulkPrepTotal = 1
+        bulkPrepCompleted = 0
+        startOfflinePrepFor(sys, isBulk = false, index = 1, total = 1)
+    }
+
+    fun prepareAllSystemsOffline() {
+        val isAr = settings.value.language == "ar"
+        if (!isOnline.value) {
+            showToast(if (isAr) "تجهيز الكل يحتاج إنترنت" else "Needs internet")
+            return
+        }
+        val states = offlineCoreManager.getAllBundleStates().associateBy { it.systemId.lowercase() }
+        val pending = OfflineCoreManager.supportedSystemOrder.filter { sys ->
+            states[sys.id.lowercase()]?.isReady != true
+        }
+        if (pending.isEmpty()) {
+            showToast(if (isAr) "جميع الأنظمة جاهزة للأوفلاين بالفعل ✓" else "All systems already ready offline ✓")
+            return
+        }
+        bulkPrepQueue = pending.toMutableList()
+        bulkPrepTotal = pending.size
+        bulkPrepCompleted = 0
+        val first = bulkPrepQueue.removeAt(0)
+        startOfflinePrepFor(first, isBulk = true, index = 1, total = bulkPrepTotal)
+    }
+
+    private fun startOfflinePrepFor(sys: RetroSystem, isBulk: Boolean, index: Int, total: Int) {
+        val s = settings.value
+        val isAr = s.language == "ar"
+        val resolvedThreadsMode = if (sys == RetroSystem.PSP) {
+            if (s.wasmThreadsMode == "off") "off" else "on"
+        } else {
+            s.wasmThreadsMode
+        }
+        _offlinePrepProgress.value = OfflinePrepProgress(
+            systemId = sys.id,
+            systemName = sys.shortName,
+            coreId = sys.ejsCore,
+            threadsEnabled = resolvedThreadsMode != "off",
+            percent = 5,
+            statusLabel = if (isAr) "جاري تحميل نواة ${sys.shortName}..." else "Downloading ${sys.shortName} core...",
+            isBulk = isBulk,
+            bulkIndex = index,
+            bulkTotal = total
+        )
+        _activePrepRequest.value = OfflinePrepRequest(
+            systemId = sys.id,
+            systemName = sys.shortName,
+            coreId = sys.ejsCore,
+            cdnMode = s.cdnMode,
+            customDataPath = s.customDataPath,
+            threadsMode = resolvedThreadsMode,
+            isBulk = isBulk,
+            bulkIndex = index,
+            bulkTotal = total,
+            requestSeq = System.currentTimeMillis()
+        )
+    }
+
+    fun onOfflinePrepareProgress(
+        systemId: String,
+        coreId: String,
+        threadsEnabled: Boolean,
+        percent: Int,
+        totalBytes: Long,
+        fileCount: Int,
+        urlsJson: String,
+        done: Boolean,
+        error: String
+    ) {
+        val curReq = _activePrepRequest.value
+        val s = settings.value
+        val isAr = s.language == "ar"
+        val sys = RetroSystem.fromId(systemId)
+
+        if (!done) {
+            _offlinePrepProgress.value = OfflinePrepProgress(
+                systemId = systemId,
+                systemName = sys.shortName,
+                coreId = coreId,
+                threadsEnabled = threadsEnabled,
+                percent = percent.coerceIn(5, 99),
+                statusLabel = if (isAr) "جاري تجهيز ${sys.shortName} ($percent%)..." else "Preparing ${sys.shortName} ($percent%)...",
+                isBulk = curReq?.isBulk == true,
+                bulkIndex = curReq?.bulkIndex ?: 1,
+                bulkTotal = curReq?.bulkTotal ?: 1
+            )
+            return
+        }
+
+        if (error.isBlank()) {
+            val urlList = mutableListOf<String>()
+            runCatching {
+                val arr = JSONArray(urlsJson)
+                for (i in 0 until arr.length()) urlList.add(arr.getString(i))
+            }
+            offlineCoreManager.markCorePrepared(
+                systemId = systemId,
+                coreId = coreId,
+                threadsPrepared = threadsEnabled,
+                totalBytes = maxOf(totalBytes, 512_000L),
+                fileCount = maxOf(fileCount, 1),
+                urls = urlList
+            )
+            refreshOfflineBundles()
+            refreshStorageUsage()
+        } else if (error != "Superseded") {
+            showToast(if (isAr) "تعذر تجهيز ${sys.shortName}: $error" else "Failed preparing ${sys.shortName}: $error")
+        }
+
+        if (curReq?.isBulk == true && bulkPrepQueue.isNotEmpty()) {
+            bulkPrepCompleted++
+            val nextSys = bulkPrepQueue.removeAt(0)
+            startOfflinePrepFor(
+                sys = nextSys,
+                isBulk = true,
+                index = (bulkPrepCompleted + 1).coerceAtMost(bulkPrepTotal),
+                total = bulkPrepTotal
+            )
+        } else {
+            _activePrepRequest.value = null
+            _offlinePrepProgress.value = null
+            if (error.isBlank()) {
+                showToast(
+                    if (isAr) "تم تجهيز ${if (curReq?.isBulk == true) "الحزم" else sys.shortName} للعمل أوفلاين ✓"
+                    else "Offline bundle ready ✓"
+                )
+            }
+        }
+    }
+
+    fun cancelOfflinePrep() {
+        bulkPrepQueue.clear()
+        _activePrepRequest.value = null
+        _offlinePrepProgress.value = null
+    }
+
+    fun deleteOfflineBundle(systemId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            offlineCoreManager.deleteBundle(systemId)
+            refreshOfflineBundles()
+            refreshStorageUsage()
+        }
+        val isAr = settings.value.language == "ar"
+        showToast(if (isAr) "تم حذف الحزمة الأوفلاين" else "Offline bundle deleted")
+    }
+
+    fun clearAllOfflineBundles() {
+        viewModelScope.launch(Dispatchers.IO) {
+            offlineCoreManager.clearAllBundles()
+            refreshOfflineBundles()
+            refreshStorageUsage()
+        }
+        val isAr = settings.value.language == "ar"
+        showToast(if (isAr) "تم مسح كاش النوى الأوفلاين" else "Cleared offline cores cache")
+    }
+
+    fun triggerOfflineDiagnostics() {
+        refreshConnectedGamepads()
+        networkMonitor.refresh()
+        _offlineDiagnostics.value = OfflineDiagnosticsReport(
+            swStatus = "checking...",
+            isolated = false,
+            sharedArrayBuffer = false,
+            androidCacheBytes = offlineCoreManager.getTotalCacheSizeBytes(),
+            readySystems = offlineCoreManager.getReadySystemNames(),
+            androidGamepads = _connectedGamepadNames.value,
+            webGamepads = emptyList(),
+            isOnline = isOnline.value
+        )
+        _diagnosticsTriggerId.value = _diagnosticsTriggerId.value + 1
+    }
+
+    fun onOfflineWebDiagnosticsResult(jsonStr: String) {
+        val obj = runCatching { JSONObject(jsonStr) }.getOrNull() ?: return
+        val webNames = mutableListOf<String>()
+        val arr = obj.optJSONArray("webGamepadNames")
+        if (arr != null) {
+            for (i in 0 until arr.length()) webNames.add(arr.optString(i))
+        }
+        _offlineDiagnostics.value = OfflineDiagnosticsReport(
+            swStatus = obj.optString("swStatus", "unknown"),
+            isolated = obj.optBoolean("isolated", false),
+            sharedArrayBuffer = obj.optBoolean("sharedArrayBuffer", false),
+            androidCacheBytes = offlineCoreManager.getTotalCacheSizeBytes(),
+            webStorageUsageBytes = obj.optLong("storageUsage", 0L),
+            webStorageQuotaBytes = obj.optLong("storageQuota", 0L),
+            webCacheEntries = obj.optInt("webCacheEntries", 0),
+            readySystems = offlineCoreManager.getReadySystemNames(),
+            androidGamepads = _connectedGamepadNames.value,
+            webGamepads = webNames,
+            isOnline = isOnline.value
+        )
+    }
+
     // BIOS
     fun importBiosUri(slotKey: String, uri: Uri) {
         viewModelScope.launch {
@@ -677,15 +961,18 @@ class RetroViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun downloadBiosFromUrl(slotKey: String, url: String) {
+        val isAr = settings.value.language == "ar"
+        if (!isOnline.value) {
+            showToast(if (isAr) "تحميل BIOS من رابط يحتاج إنترنت" else "Needs internet")
+            return
+        }
         viewModelScope.launch {
             runCatching {
                 val entry = gameRepo.downloadBiosFromUrl(slotKey, url.trim())
                 settingsRepo.updateBiosEntry(entry)
                 refreshStorageUsage()
-                val isAr = settings.value.language == "ar"
                 showToast(if (isAr) "تم تحميل وحفظ BIOS: ${entry.name}" else "Downloaded BIOS: ${entry.name}")
             }.onFailure {
-                val isAr = settings.value.language == "ar"
                 showToast(
                     if (isAr) "تعذر تحميل ملف BIOS من الرابط، اختره من الهاتف"
                     else "Failed to download BIOS URL; pick file from device"
@@ -707,13 +994,17 @@ class RetroViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Gemini AI Actions
+    // Gemini AI Actions (gracefully gated when offline)
     fun askAiErrorDiagnosis(errorDetail: String, logs: String, gameTitle: String, systemName: String) {
+        val isAr = settings.value.language == "ar"
+        if (!isOnline.value) {
+            _aiDiagnosticResult.value = if (isAr) "تحتاج إنترنت لتشغيل تحليل Gemini الذكي." else "Needs internet for Gemini AI diagnosis."
+            return
+        }
         viewModelScope.launch {
             _aiBusy.value = true
             _aiDiagnosticResult.value = null
             val s = settings.value
-            val isAr = s.language == "ar"
             val res = GeminiAssistantService.diagnoseErrorLog(
                 apiKey = s.geminiApiKey,
                 model = s.geminiModel,
@@ -731,10 +1022,14 @@ class RetroViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun requestAiPerfRecommendation(gameTitle: String, systemName: String) {
+        val isAr = settings.value.language == "ar"
+        if (!isOnline.value) {
+            showToast(if (isAr) "توصيات الذكاء الاصطناعي تحتاج إنترنت" else "Needs internet")
+            return
+        }
         viewModelScope.launch {
             _aiBusy.value = true
             val s = settings.value
-            val isAr = s.language == "ar"
             val res = GeminiAssistantService.recommendPerformance(
                 apiKey = s.geminiApiKey,
                 model = s.geminiModel,
@@ -762,10 +1057,14 @@ class RetroViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun fetchAiGameInfo(game: GameEntity) {
+        val isAr = settings.value.language == "ar"
+        if (!isOnline.value) {
+            showToast(if (isAr) "ميزة Gemini تحتاج إنترنت" else "Needs internet")
+            return
+        }
         viewModelScope.launch {
             _aiBusy.value = true
             val s = settings.value
-            val isAr = s.language == "ar"
             val sysName = RetroSystem.fromId(game.systemId).fullNameEn
             val res = GeminiAssistantService.fetchGameInfo(
                 apiKey = s.geminiApiKey,
@@ -787,11 +1086,17 @@ class RetroViewModel(application: Application) : AndroidViewModel(application) {
     fun sendAiChatPrompt(userText: String) {
         val clean = userText.trim()
         if (clean.isEmpty()) return
+        val s = settings.value
+        val isAr = s.language == "ar"
+        if (!isOnline.value) {
+            _aiChatMessages.value = _aiChatMessages.value +
+                AiChatMessage(true, clean) +
+                AiChatMessage(false, if (isAr) "تحتاج إنترنت لاستخدام المساعد الذكي." else "Internet connection required for AI assistant.")
+            return
+        }
         _aiChatMessages.value = _aiChatMessages.value + AiChatMessage(true, clean)
         viewModelScope.launch {
             _aiBusy.value = true
-            val s = settings.value
-            val isAr = s.language == "ar"
             val sysPrompt = if (isAr) {
                 "أنت مساعد تطبيق RetroVerse الخبير في الألعاب الكلاسيكية وملفات BIOS وأكواد الغش (CWCheat/GameShark/Game Genie) وإعدادات EmulatorJS. أجب باختصار ووضوح بالعربية:\n$clean"
             } else {
