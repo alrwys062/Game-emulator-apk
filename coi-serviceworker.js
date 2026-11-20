@@ -3,7 +3,7 @@
   const SHELL_CACHE = 'rv-shell-v1';
   const EJS_CACHE = 'ejs-v1';
   const DEFAULT_COEP = 'credentialless';
-  const SHELL_URLS = ['./', './index.html', './coi-serviceworker.js'];
+  const SHELL_URLS = ['./', './index.html', './coi-serviceworker.js', './icon-192.png', './icon-512.png'];
 
   function withIsolationHeaders(response) {
     if (!response || response.status === 0 || response.type === 'opaque') return response;
